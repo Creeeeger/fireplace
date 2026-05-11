@@ -3,12 +3,10 @@ project(fireplace C)
 
 set(CMAKE_C_STANDARD 11)
 
-# Include include directory (what a tongue-twister)
-add_subdirectory(include)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+	set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
 
-# Include root subdirectory CMakeLists
+add_subdirectory(include)
 add_subdirectory(emulator)
 add_subdirectory(gui)
-
-# add_executable and linking is handled by emulator/core/CMakeLists.txt
-# See you there!
