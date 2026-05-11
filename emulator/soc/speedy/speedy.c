@@ -75,7 +75,7 @@ void speedy_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size, in
 				if ((value >> 31) & 1)
 				{
 					printf("SWRESET Requested on SPEEDY %i\n",
-					       address >= 0x15950000 >= 0x0 ? 1 : 0);
+					       address >= 0x15950000 ? 1 : 0);
 				}
 				break;
 

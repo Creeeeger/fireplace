@@ -17,6 +17,8 @@
 #ifndef FIREPLACE_FB_H
 #define FIREPLACE_FB_H
 
+#include <pthread.h>
+
 #include <unicorn/unicorn.h>
 
 #define FB_ADDRESS 0xf1000000
