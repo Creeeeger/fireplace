@@ -1,5 +1,6 @@
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UNICORN REQUIRED IMPORTED_TARGET unicorn)
+pkg_check_modules(CRYPTO REQUIRED IMPORTED_TARGET libcrypto)
 
 add_library(fireplace_soc STATIC
 	fb/fb.c
@@ -11,6 +12,7 @@ add_library(fireplace_soc STATIC
 	speedy/speedy.c
 	uart/uart.c
 	usb/usb.c
+	ufs/ufs.c
 )
 
 target_include_directories(fireplace_soc PRIVATE
@@ -20,4 +22,5 @@ target_include_directories(fireplace_soc PRIVATE
 target_link_libraries(fireplace_soc PRIVATE
 	fireplace_include
 	PkgConfig::UNICORN
+	PkgConfig::CRYPTO
 )
