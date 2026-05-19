@@ -105,3 +105,184 @@ int ufs_init(struct uc_struct *uc_s)
 	return 0;
 }
 
+static void complete_uic_read(uc_engine *uc)
+{
+	uint32_t status;
+
+	if (!uic_command_pending_completion)
+		return;
+	if (uic_command_needs_pms) {
+		uc_mem_read(uc, REG_HOST_CONTROLLER_STATUS, &status,
+			    sizeof(status));
+		status &= ~(UINT32_C(0x7) << 8);
+		status |= UINT32_C(0x1) << 8;
+		uc_mem_write(uc, REG_HOST_CONTROLLER_STATUS, &status,
+			     sizeof(status));
+		status = 0x410;
+		uic_command_needs_pms = false;
+	} else {
+		status = 0x400;
+	}
+	uc_mem_write(uc, REG_INTERRUPT_STATUS, &status, sizeof(status));
+	uic_command_pending_completion = false;
+}
+
+static void handle_uic_command(uc_engine *uc, uint32_t command)
+{
+	uint32_t status;
+
+	switch (command) {
+	case UIC_CMD_DME_PEER_SET:
+		uic_command_pending_completion = true;
+		break;
+	case UIC_CMD_DME_LINK_STARTUP:
+		status = 0x7 | (UINT32_C(1) << 8);
+		uc_mem_write(uc, REG_HOST_CONTROLLER_STATUS, &status,
+			     sizeof(status));
+		uic_command_pending_completion = true;
+		break;
+	case UIC_CMD_DME_GET:
+		switch (arg1) {
+		case 0x1520 << 16:
+			arg3 = 2;
+			break;
+		case 0x1540 << 16:
+			arg3 = 2;
+			break;
+		case 0x1587 << 16:
+			arg3 = 4;
+			break;
+		case 0x1560 << 16:
+			arg3 = active_tx;
+			break;
+		case 0x1561 << 16:
+			arg3 = active_tx;
+			active_tx = 2;
+			break;
+		case 0x1580 << 16:
+			arg3 = active_rx;
+			break;
+		case 0x1581 << 16:
+			arg3 = active_rx;
+			active_rx = 2;
+			break;
+		case 0x1543 << 16:
+			arg3 = 1;
+			break;
+		default:
+			if (!dme_attr_get(arg1, &arg3)) {
+				arg3 = 0;
+			}
+			break;
+		}
+		uc_mem_write(uc, REG_UIC_ARG3, &arg3, sizeof(arg3));
+		uic_command_pending_completion = true;
+		break;
+	case UIC_CMD_DME_SET:
+		dme_attr_set(arg1, arg3);
+		if (arg1 == (0x1560 << 16))
+			active_tx = arg3 ? arg3 : active_tx;
+		else if (arg1 == (0x1580 << 16))
+			active_rx = arg3 ? arg3 : active_rx;
+		if (arg1 == (0x1571 << 16))
+			uic_command_needs_pms = true;
+		uic_command_pending_completion = true;
+		break;
+	default:
+		printf("[UFS] Unknown UIC_COMMAND: 0x%x\n", command);
+		uic_command_pending_completion = true;
+		break;
+	}
+}
+void ufs_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size,
+	      int64_t value, void *user_data)
+{
+	(void)size;
+	(void)user_data;
+
+	if (!uic_command_pending_completion && !utp_command_pending_completion) {
+		uint32_t clear = 0;
+		uc_mem_write(uc, REG_INTERRUPT_STATUS, &clear, sizeof(clear));
+	}
+	switch (address) {
+	case REG_INTERRUPT_STATUS:
+		if (type == UC_MEM_READ) {
+			uint32_t status = 1;
+
+			complete_uic_read(uc);
+			if (utp_command_pending_completion) {
+				uc_mem_write(uc, REG_INTERRUPT_STATUS, &status,
+					     sizeof(status));
+				utp_command_pending_completion = false;
+			}
+		}
+		break;
+	case REG_HOST_CONTROLLER_STATUS:
+		if (type == UC_MEM_READ) {
+			uint32_t hcs = 0x7 | (UINT32_C(1) << 8);
+
+			uc_mem_write(uc, REG_HOST_CONTROLLER_STATUS, &hcs,
+				     sizeof(hcs));
+		}
+		break;
+	case REG_UIC_COMMAND:
+		if (type == UC_MEM_WRITE)
+			handle_uic_command(uc, (uint32_t)value);
+		break;
+	case REG_UIC_ARG1:
+		if (type == UC_MEM_WRITE)
+			arg1 = (uint32_t)value;
+		break;
+	case REG_UIC_ARG2:
+		if (type == UC_MEM_WRITE)
+			arg2 = (uint32_t)value;
+		break;
+	case REG_UIC_ARG3:
+		if (type == UC_MEM_WRITE)
+			arg3 = (uint32_t)value;
+		break;
+	case UFS_BASE + 0x1154:
+	case UFS_BASE + 0x1150:
+	{
+		uint32_t zero = 0;
+
+		uc_mem_write(uc, UFS_BASE + 0x1150, &zero, sizeof(zero));
+		uc_mem_write(uc, UFS_BASE + 0x1154, &zero, sizeof(zero));
+		break;
+	}
+	case REG_UTP_TRANSFER_REQ_LIST_BASE_L:
+		if (type == UC_MEM_WRITE)
+			utrdlba = (uint32_t)value;
+		break;
+	case REG_UTP_TRANSFER_REQ_LIST_BASE_H:
+		if (type == UC_MEM_WRITE)
+			utrdlbau = (uint32_t)value;
+		break;
+	case UFS_BASE + 0x4000 + (0xce4 + 0x800 * 0):
+	case UFS_BASE + 0x4000 + (0xce4 + 0x800 * 1):
+	case UFS_BASE + 0x4000 + (0xce4 + 0x800 * 2):
+		if (type == UC_MEM_READ) {
+			uint32_t locked = 0x08;
+
+			uc_mem_write(uc, address, &locked, sizeof(locked));
+		}
+		break;
+	case REG_UTP_TRANSFER_REQ_DOOR_BELL:
+		if (type == UC_MEM_WRITE && value) {
+			uc_err err;
+
+			err = ufs_handle_transfer_request(
+					uc, ((uint64_t)utrdlbau << 32) | utrdlba);
+			if (err != UC_ERR_OK)
+				printf("[UFS] Transfer request failed: %s\n",
+				       uc_strerror(err));
+			utp_command_pending_completion = true;
+		} else if (type == UC_MEM_READ && !utp_command_pending_completion) {
+			uint32_t clear = 0;
+
+			uc_mem_write(uc, REG_UTP_TRANSFER_REQ_DOOR_BELL, &clear,
+				     sizeof(clear));
+		}
+		break;
+	}
+}
