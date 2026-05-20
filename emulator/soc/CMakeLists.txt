@@ -14,6 +14,7 @@ add_library(fireplace_soc STATIC
 	usb/usb.c
 	ufs/ufs.c
 	ufs/ufs_endian.c
+	ufs/ufs_prdt.c
 )
 
 target_include_directories(fireplace_soc PRIVATE
