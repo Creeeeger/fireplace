@@ -15,6 +15,7 @@ add_library(fireplace_soc STATIC
 	ufs/ufs.c
 	ufs/ufs_endian.c
 	ufs/ufs_prdt.c
+	ufs/ufs_transfer.c
 )
 
 target_include_directories(fireplace_soc PRIVATE
