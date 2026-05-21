@@ -13,6 +13,7 @@ add_library(fireplace_soc STATIC
 	uart/uart.c
 	usb/usb.c
 	ufs/ufs.c
+	ufs/ufs_descriptors.c
 	ufs/ufs_endian.c
 	ufs/ufs_prdt.c
 	ufs/ufs_transfer.c
