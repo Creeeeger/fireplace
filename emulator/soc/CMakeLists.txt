@@ -17,6 +17,7 @@ add_library(fireplace_soc STATIC
 	ufs/ufs_endian.c
 	ufs/ufs_prdt.c
 	ufs/ufs_query.c
+	ufs/ufs_rpmb.c
 	ufs/ufs_scsi.c
 	ufs/ufs_storage.c
 	ufs/ufs_transfer.c
