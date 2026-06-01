@@ -10,6 +10,7 @@ add_library(fireplace_soc STATIC
 	memmap.c
 	soc.c
 	speedy/speedy.c
+	sss/sss_key.c
 	uart/uart.c
 	usb/usb.c
 	ufs/ufs.c
