@@ -12,6 +12,7 @@ add_library(fireplace_soc STATIC
 	speedy/speedy.c
 	sss/sss.c
 	sss/sss_key.c
+	sss/sss_math.c
 	uart/uart.c
 	usb/usb.c
 	ufs/ufs.c
