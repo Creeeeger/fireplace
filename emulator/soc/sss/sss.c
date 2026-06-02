@@ -137,3 +137,135 @@ static void sss_set_feed_ready(uc_engine *uc, bool ready)
 		sss_clear_status_bits(uc, SSS_FEED_READY);
 }
 
+void sss_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size,
+	      int64_t value, void *user_data)
+{
+	uint32_t status;
+	size_t index;
+
+	(void)user_data;
+	if (type == UC_MEM_WRITE && size == 4 &&
+	    sss_reg_index(address, &index)) {
+		uint32_t written = (uint32_t)value;
+
+		if (address == SSS_FEED_STATUS_CLEAR) {
+			sss_clear_status_bits(uc, written);
+		} else if (address == SSS_HASH_STATUS) {
+			sss_set_reg(uc, address, sss_regs[index] & ~written);
+			if ((written & (SSS_HASH_DONE | SSS_HASH_ERROR)) != 0) {
+				sss_hash_pending = false;
+				sss_cipher_hash_pending = false;
+			}
+		} else if (address == SSS_MATH_STATUS) {
+			sss_set_reg(uc, address, sss_regs[index] & ~written);
+		} else if (address == SSS_CIPHER_STATUS) {
+			sss_set_reg(uc, address, sss_regs[index] & ~written);
+		} else if (address == SSS_RNG_COMMAND) {
+			if (written != 0)
+				sss_start_rng(uc);
+			else
+				sss_set_reg(uc, address, 0);
+		} else {
+			sss_regs[index] = written;
+			if (address == SSS_HASH_CONTROL) {
+				sss_cipher_hash_pending = (written & 1) != 0;
+				if (written == 0)
+					sss_hash_pending = false;
+			}
+		}
+		if (address >= SSS_CIPHER_KEY_256 &&
+		    address < SSS_CIPHER_KEY_128 + 16)
+			sss_cipher_internal_key_bound = false;
+		if (address == SSS_KEY_MANAGER_COMMAND)
+			sss_complete_key_manager_command(uc, written);
+		if (address == SSS_SRC_LEN && written != 0)
+			sss_set_feed_ready(uc, true);
+		if (address == SSS_SRC_LEN && written != 0)
+			sss_hash_pending = true;
+		if (address == SSS_CIPHER_DST_LEN && written != 0 &&
+		    sss_reg(SSS_CIPHER_SRC_LEN) != 0) {
+			if (!sss_complete_cipher_dma(uc)) {
+				if (sss_cipher_internal_key_bound &&
+				    !sss_key_manager_key_valid)
+					sss_cipher_internal_key_bound = false;
+				sss_set_status_bits(uc, SSS_CIPHER_ERROR);
+				sss_set_reg(uc, SSS_CIPHER_STATUS,
+					    sss_reg(SSS_CIPHER_STATUS) |
+					    SSS_CIPHER_ERROR);
+			}
+		}
+		if (address == SSS_CIPHER_PIO_INPUT + 3 * sizeof(uint32_t) &&
+		    !sss_complete_cipher_pio(uc)) {
+			if (sss_cipher_internal_key_bound &&
+			    !sss_key_manager_key_valid)
+				sss_cipher_internal_key_bound = false;
+			sss_set_reg(uc, SSS_CIPHER_STATUS,
+				    sss_reg(SSS_CIPHER_STATUS) |
+				    SSS_CIPHER_PIO_ERROR);
+		}
+		if (address == SSS_MATH_COMMAND) {
+			(void)sss_complete_math(uc, written);
+			sss_set_reg(uc, SSS_MATH_STATUS,
+				    sss_reg(SSS_MATH_STATUS) | SSS_MATH_DONE);
+		}
+		return;
+	}
+	if (type != UC_MEM_READ)
+		return;
+	if (address == SSS_SECURE_SERVICE_STATUS) {
+		status = sss_reg(address) | SSS_SECURE_SERVICE_READY;
+		sss_set_reg(uc, address, status);
+		return;
+	}
+	if (address == SSS_MATH_STATUS) {
+		/*
+		 * MATH_STATUS is a latched, write-one-to-clear completion
+		 * register.  Completion is raised when MATH_COMMAND is written
+		 * above; a plain status read must not raise it again.  The lower
+		 * firmware clears the bit and rereads it to verify that the PKA
+		 * interrupt was acknowledged.
+		 */
+		sss_set_reg(uc, address, sss_reg(address));
+		return;
+	}
+	if (address == SSS_CIPHER_STATUS) {
+		status = sss_reg(address) | SSS_CIPHER_DONE |
+			 SSS_CIPHER_INPUT_READY;
+		sss_set_reg(uc, address, status);
+		return;
+	}
+	if (address == SSS_RNG_STATUS) {
+		status = sss_reg(address) | SSS_RNG_READY;
+		sss_set_reg(uc, address, status);
+		return;
+	}
+	if (address == SSS_RNG_COMMAND) {
+		sss_set_reg(uc, address, 0);
+		return;
+	}
+	if (address == SSS_KEY_MANAGER_STATUS) {
+		status = sss_reg(address) | SSS_KEY_MANAGER_READY |
+			 SSS_KEY_MANAGER_DONE;
+		sss_set_reg(uc, address, status);
+		return;
+	}
+	if (address == SSS_FEED_STATUS || address == SSS_FEED_STATUS_CLEAR) {
+		status = sss_reg(address);
+		if (sss_feed_ready)
+			status |= SSS_FEED_READY;
+		else
+			status &= ~SSS_FEED_READY;
+		sss_set_reg(uc, address, status);
+		return;
+	}
+	if (address != SSS_HASH_STATUS)
+		return;
+
+	status = sss_reg(address);
+	if ((status & SSS_HASH_DONE) == 0 && sss_hash_pending) {
+		if (!sss_compute_hash(uc))
+			return;
+		status = sss_reg(address) | SSS_HASH_DONE;
+	}
+	sss_set_reg(uc, address, status);
+}
