@@ -208,3 +208,154 @@ out:
 	return ok;
 }
 
+static bool sss_math_complete_ecc(uc_engine *uc, uint32_t operation,
+				  uint32_t destination,
+				  uint32_t source_a_slot,
+				  uint32_t source_b_slot,
+				  uint32_t stride, const BIGNUM *radix,
+				  const BIGNUM *modulus, BN_CTX *context)
+{
+	EC_GROUP *group = NULL;
+	EC_POINT *point_a = NULL;
+	EC_POINT *point_b = NULL;
+	EC_POINT *term_a = NULL;
+	EC_POINT *term_b = NULL;
+	EC_POINT *sum = NULL;
+	BIGNUM *curve_modulus = NULL;
+	BIGNUM *scalar_a = NULL;
+	BIGNUM *scalar_b = NULL;
+	bool ok = false;
+
+	group = EC_GROUP_new_by_curve_name(NID_secp384r1);
+	point_a = group ? EC_POINT_new(group) : NULL;
+	term_a = group ? EC_POINT_new(group) : NULL;
+	sum = group ? EC_POINT_new(group) : NULL;
+	curve_modulus = BN_new();
+	scalar_a = sss_math_read_slot(uc, source_a_slot, stride);
+	if (!group || !point_a || !term_a || !sum || !curve_modulus || !scalar_a ||
+	    EC_GROUP_get_curve(group, curve_modulus, NULL, NULL, context) != 1 ||
+	    BN_cmp(curve_modulus, modulus) != 0 ||
+	    !sss_math_read_affine_point(uc, group, point_a, source_a_slot + 1,
+					stride, radix, modulus, context) ||
+	    EC_POINT_mul(group, term_a, NULL, point_a, scalar_a, context) != 1)
+		goto out;
+
+	if (operation == SSS_MATH_OP_ECC_MUL_ADD) {
+		point_b = EC_POINT_new(group);
+		term_b = EC_POINT_new(group);
+		scalar_b = sss_math_read_slot(uc, source_b_slot, stride);
+		if (!point_b || !term_b || !scalar_b ||
+		    !sss_math_read_affine_point(uc, group, point_b,
+						source_b_slot + 1, stride, radix,
+						modulus, context) ||
+		    EC_POINT_mul(group, term_b, NULL, point_b, scalar_b,
+				 context) != 1 ||
+		    EC_POINT_add(group, sum, term_a, term_b, context) != 1)
+			goto out;
+	} else if (EC_POINT_copy(sum, term_a) != 1) {
+		goto out;
+	}
+
+	ok = sss_math_write_affine_point(uc, group, sum, destination, stride,
+					 radix, modulus, context);
+
+out:
+	EC_POINT_free(point_a);
+	EC_POINT_free(point_b);
+	EC_POINT_free(term_a);
+	EC_POINT_free(term_b);
+	EC_POINT_free(sum);
+	EC_GROUP_free(group);
+	BN_free(curve_modulus);
+	BN_free(scalar_a);
+	BN_free(scalar_b);
+	return ok;
+}
+
+bool sss_complete_math(uc_engine *uc, uint32_t command)
+{
+	uint32_t config[8] = {0};
+	uint32_t operands = sss_reg(SSS_MATH_OPERANDS);
+	uint32_t destination = operands & UINT32_C(0xff);
+	uint32_t modulus_slot = (operands >> 8) & UINT32_C(0xff);
+	uint32_t source_b_slot = (operands >> 16) & UINT32_C(0xff);
+	uint32_t source_a_slot = (operands >> 24) & UINT32_C(0xff);
+	uint32_t operation = command & ~UINT32_C(0x3010);
+	uint32_t stride;
+	BIGNUM *source_a = NULL;
+	BIGNUM *source_b = NULL;
+	BIGNUM *modulus = NULL;
+	BIGNUM *radix = NULL;
+	BIGNUM *decoded = NULL;
+	BIGNUM *result = NULL;
+	BN_CTX *context = NULL;
+	bool ok = false;
+
+	(void)uc_mem_read(uc, UINT64_C(0x2c858), config, sizeof(config));
+	stride = config[3];
+	if (stride == 0)
+		stride = UINT32_C(0x48);
+	source_a = sss_math_read_slot(uc, source_a_slot, stride);
+	modulus = sss_math_read_slot(uc, modulus_slot, stride);
+	radix = sss_math_read_radix(uc, modulus_slot, stride);
+	decoded = BN_new();
+	result = BN_new();
+	context = BN_CTX_new();
+	if (!source_a || !modulus || !radix || !decoded || !result || !context ||
+	    BN_is_zero(modulus) || BN_is_zero(radix))
+		goto out;
+	if (operation == SSS_MATH_OP_MOD_MUL ||
+	    operation == SSS_MATH_OP_MODEXP) {
+		source_b = sss_math_read_slot(uc, source_b_slot, stride);
+		if (!source_b)
+			goto out;
+	}
+
+	switch (operation) {
+	case SSS_MATH_OP_MOD_MUL:
+		ok = BN_mod_mul(result, source_a, source_b, modulus, context) == 1;
+		break;
+	case SSS_MATH_OP_MONT_REDUCE:
+		ok = sss_math_montgomery_reduce(result, source_a, radix, modulus,
+						 context);
+		break;
+	case SSS_MATH_OP_MODEXP:
+		/* The firmware enters Montgomery form before invoking MODEXP. */
+		ok = sss_math_montgomery_reduce(decoded, source_a, radix, modulus,
+						 context) &&
+		     BN_mod_exp(result, decoded, source_b, modulus, context) == 1;
+		break;
+	case SSS_MATH_OP_ECC_MUL:
+	case SSS_MATH_OP_ECC_MUL_ADD:
+		ok = sss_math_complete_ecc(uc, operation, destination,
+					   source_a_slot, source_b_slot, stride,
+					   radix, modulus, context);
+		break;
+	default:
+		fprintf(stderr, "[SSS] unsupported math command 0x%08x\n",
+			command);
+		goto out;
+	}
+	if (ok && operation != SSS_MATH_OP_ECC_MUL &&
+	    operation != SSS_MATH_OP_ECC_MUL_ADD)
+		ok = sss_math_write_slot(uc, destination, stride, result);
+	if (ok)
+		sss_math_clear_sign(uc, destination);
+out:
+	if (!ok)
+		fprintf(stderr,
+			"[SSS] failed MATH command=0x%08x"
+			" dst=%u a=%u b=%u mod=%u stride=0x%x\n",
+			command, destination, source_a_slot, source_b_slot,
+			modulus_slot, stride);
+	BN_free(source_a);
+	BN_free(source_b);
+	BN_free(modulus);
+	BN_free(radix);
+	BN_free(decoded);
+	BN_free(result);
+	BN_CTX_free(context);
+	return ok;
+}
+
+
