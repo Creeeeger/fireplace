@@ -116,3 +116,106 @@ bool sss_complete_cipher_pio(uc_engine *uc)
 	return true;
 }
 
+bool sss_complete_cipher_dma(uc_engine *uc)
+{
+	EVP_CIPHER_CTX *ctx;
+	const EVP_CIPHER *cipher;
+	const unsigned char *key;
+	const unsigned char *iv;
+	unsigned char *input;
+	unsigned char *output;
+	uint64_t source;
+	uint64_t dest;
+	uint32_t source_len;
+	uint32_t dest_len;
+	uint32_t length;
+	uint32_t control;
+	uint32_t key_len;
+	int out_len = 0;
+	int final_len = 0;
+	bool decrypt;
+	bool cbc;
+	bool ctr;
+	bool ok = false;
+
+	source = ((uint64_t)sss_reg(SSS_CIPHER_SRC_ADDR_HI) << 32) |
+		 sss_reg(SSS_CIPHER_SRC_ADDR_LO);
+	dest = ((uint64_t)sss_reg(SSS_CIPHER_DST_ADDR_HI) << 32) |
+	       sss_reg(SSS_CIPHER_DST_ADDR_LO);
+	source_len = sss_reg(SSS_CIPHER_SRC_LEN);
+	dest_len = sss_reg(SSS_CIPHER_DST_LEN);
+	length = source_len < dest_len ? source_len : dest_len;
+	control = sss_reg(SSS_CIPHER_CONTROL);
+
+	if (length == 0 || length > SSS_MAX_INPUT_SIZE)
+		return false;
+
+	input = malloc(length);
+	output = malloc((size_t)length + EVP_MAX_BLOCK_LENGTH);
+	if (!input || !output) {
+		sss_log_error("failed to allocate cipher input", 0, control,
+			      source, length);
+		goto out;
+	}
+	if (uc_mem_read(uc, source, input, length) != UC_ERR_OK) {
+		sss_log_error("failed to read cipher input", 0, control, source,
+			      length);
+		goto out;
+	}
+
+	decrypt = (control & 1) != 0;
+	cbc = (control & 0x2) != 0;
+	ctr = (control & UINT32_C(0x0c)) == UINT32_C(0x0c);
+	if (!sss_cipher_key(control, &key, &key_len)) {
+		sss_log_error("unsupported cipher key request", 0, control,
+			      source, length);
+		goto out;
+	}
+	cipher = ctr ? sss_select_ctr_cipher(key_len) :
+		 sss_select_cipher(key_len, cbc);
+	if (!cipher) {
+		sss_log_error("unsupported cipher request", 0, control, source,
+			      length);
+		goto out;
+	}
+
+	iv = (const unsigned char *)sss_regs +
+	     (((control & 0x4) != 0 ? SSS_CIPHER_IV_ALT : SSS_CIPHER_IV_BASE) -
+	      SSS_BASE);
+	ctx = EVP_CIPHER_CTX_new();
+	if (!ctx)
+		goto out;
+	if (EVP_CipherInit_ex(ctx, cipher, NULL, key,
+			      (cbc || ctr) ? iv : NULL,
+			      decrypt ? 0 : 1) == 1 &&
+	    EVP_CIPHER_CTX_set_padding(ctx, 0) == 1 &&
+	    EVP_CipherUpdate(ctx, output, &out_len, input, (int)length) == 1 &&
+	    EVP_CipherFinal_ex(ctx, output + out_len, &final_len) == 1 &&
+	    out_len + final_len == (int)length &&
+	    uc_mem_write(uc, dest, output, length) == UC_ERR_OK)
+		ok = true;
+	EVP_CIPHER_CTX_free(ctx);
+
+	if (!ok) {
+		sss_log_error("failed to service cipher request", 0, control,
+			      source, length);
+		goto out;
+	}
+
+	sss_set_status_bits(uc, SSS_CIPHER_DONE);
+	sss_set_reg(uc, SSS_CIPHER_STATUS,
+		    sss_reg(SSS_CIPHER_STATUS) | SSS_CIPHER_DONE);
+	if (sss_cipher_hash_pending && (sss_reg(SSS_HASH_CONTROL) & 1) != 0) {
+		if (sss_compute_buffer_hash(uc, output, length, dest)) {
+			uint32_t status = sss_reg(SSS_HASH_STATUS) | SSS_HASH_DONE;
+
+			sss_set_reg(uc, SSS_HASH_STATUS, status);
+		}
+	}
+out:
+	free(input);
+	free(output);
+	return ok;
+}
+
+
