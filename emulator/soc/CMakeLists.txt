@@ -3,6 +3,7 @@ pkg_check_modules(UNICORN REQUIRED IMPORTED_TARGET unicorn)
 pkg_check_modules(CRYPTO REQUIRED IMPORTED_TARGET libcrypto)
 
 add_library(fireplace_soc STATIC
+	apm/apm.c
 	fb/fb.c
 	gpio/exynos_gpio.c
 	gpio/gpio_alive.c
