@@ -8,6 +8,7 @@ add_library(fireplace_soc STATIC
 	gpio/exynos_gpio.c
 	gpio/gpio_alive.c
 	hardware_buttons/hardware_buttons.c
+	mct/mct.c
 	memmap.c
 	soc.c
 	speedy/speedy.c
