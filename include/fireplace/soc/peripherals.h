@@ -29,8 +29,8 @@ struct peripheral
 	/* Do we need a callback? */
 	bool hook;
 
-	uint64_t addressBase;
-	uint64_t addressSize;
+	union { uint64_t addressBase; uint64_t base; };
+	union { uint64_t addressSize; uint64_t size; };
 
 	/* This one is required. Called on soc init. Never again. */
 	int (*peri_init)(struct uc_struct*);
