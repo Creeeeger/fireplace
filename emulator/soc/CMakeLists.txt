@@ -12,6 +12,7 @@ add_library(fireplace_soc STATIC
 	hardware_buttons/hardware_buttons.c
 	mct/mct.c
 	memmap.c
+	otp/otp.c
 	soc.c
 	speedy/speedy.c
 	sss/sss.c
