@@ -148,3 +148,38 @@ static bool otp_load_fuses(void)
 	return true;
 }
 
+static void otp_update_status(uc_engine *uc, uint32_t clear, uint32_t set)
+{
+	uint32_t status = 0;
+
+	if (uc_mem_read(uc, OTP_STATUS, &status, sizeof(status)) !=
+	    UC_ERR_OK)
+		return;
+	status = (status & ~clear) | set;
+	(void)uc_mem_write(uc, OTP_STATUS, &status, sizeof(status));
+}
+
+static bool otp_complete_read(uc_engine *uc)
+{
+	uint32_t address = 0;
+	uint32_t data = 0;
+	size_t index;
+
+	if (uc_mem_read(uc, OTP_READ_ADDRESS, &address, sizeof(address)) !=
+	    UC_ERR_OK)
+		return false;
+	address &= OTP_FUSE_ROW_MASK;
+	if (!otp_load_fuses())
+		return false;
+	index = address >> OTP_FUSE_ROW_SHIFT;
+	/* A sparse profile records programmed rows; all other rows are blank. */
+	if (otp_fuse_rows_present[index])
+		data = otp_fuse_rows[index];
+	if (uc_mem_write(uc, OTP_READ_DATA0, &data, sizeof(data)) != UC_ERR_OK ||
+	    uc_mem_write(uc, OTP_READ_DATA1, &data, sizeof(data)) != UC_ERR_OK)
+		return false;
+
+	printf("[OTP-CON] read fuse row 0x%04" PRIx32 "\n", address);
+	return true;
+}
+
