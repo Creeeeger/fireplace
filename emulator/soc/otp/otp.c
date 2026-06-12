@@ -183,3 +183,76 @@ static bool otp_complete_read(uc_engine *uc)
 	return true;
 }
 
+static bool otp_complete_program(uc_engine *uc)
+{
+	uint32_t address = 0;
+	uint32_t row;
+	uint32_t bit;
+	size_t index;
+
+	/* Read and program commands share the controller's address latch. */
+	if (uc_mem_read(uc, OTP_READ_ADDRESS, &address, sizeof(address)) !=
+		UC_ERR_OK ||
+	    !otp_load_fuses())
+		return false;
+
+	/*
+	 * Bit 31 selects the program path. Bits 14:5 select the physical row,
+	 * including row bit 9; bits 4:0 select the fuse within that row.
+	 */
+	row = (address & ~OTP_PROGRAM_COMMAND_MASK) & OTP_FUSE_ROW_MASK;
+	index = row >> OTP_FUSE_ROW_SHIFT;
+
+	/*
+	 * The controller programs one fuse bit selected by address[4:0].
+	 * Keep the one-way program latch for idempotency, but do not rewrite the
+	 * read-only device profile during the same boot.  Real fuse sensing is
+	 * refreshed separately; this is why the reference warranty request
+	 * completes while its immediately following read still returns zero.
+	 */
+	bit = UINT32_C(1) << (address & 31);
+	otp_program_latches[index] |= bit;
+	return true;
+}
+
+void otp_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size,
+	      int64_t value, void *user_data)
+{
+	uint32_t request = (uint32_t)value;
+
+	(void)user_data;
+	(void)size;
+
+	if (type != UC_MEM_WRITE || address != OTP_CONTROL)
+		return;
+
+	if (request == 0) {
+		otp_update_status(uc, OTP_COMPLETION_MASK, 0);
+		return;
+	}
+
+	if ((request & OTP_INIT_REQUEST) != 0) {
+		otp_update_status(uc, OTP_ERROR, OTP_INIT_COMPLETE);
+		if (!otp_init_logged) {
+			printf("[OTP-CON] initialization completed\n");
+			otp_init_logged = true;
+		}
+		return;
+	}
+
+	if ((request & OTP_READ_REQUEST) != 0 && otp_complete_read(uc)) {
+		otp_update_status(uc, OTP_ERROR, OTP_READ_COMPLETE);
+		return;
+	}
+	if ((request & OTP_PROGRAM_REQUEST) != 0 &&
+	    otp_complete_program(uc)) {
+		otp_update_status(uc, OTP_ERROR, OTP_PROGRAM_COMPLETE);
+		return;
+	}
+	if ((request & OTP_FINISH_REQUEST) != 0) {
+		otp_update_status(uc, OTP_ERROR, OTP_FINISH_COMPLETE);
+		return;
+	}
+
+	otp_update_status(uc, OTP_COMPLETION_MASK, OTP_ERROR);
+}
