@@ -33,6 +33,10 @@ add_library(fireplace_soc STATIC
 	ufs/ufs_transfer.c
 )
 
+target_sources(fireplace_soc PRIVATE
+	bootchain/bootchain.c
+)
+
 target_include_directories(fireplace_soc PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}
 )

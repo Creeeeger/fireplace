@@ -17,7 +17,22 @@
 #ifndef FIREPLACE_EMULATOR_H
 #define FIREPLACE_EMULATOR_H
 
-void* _emulator_init(void* dummy);
+#include <stdbool.h>
+#include <stdint.h>
+
+enum fireplace_boot_mode {
+	FIREPLACE_BOOT_ANDROID = 0,
+	FIREPLACE_BOOT_RECOVERY,
+	FIREPLACE_BOOT_DOWNLOAD,
+};
+
+struct fireplace_emulator_options {
+	const char *lun_directory;
+	enum fireplace_boot_mode boot_mode;
+	bool headless;
+};
+
+void *_emulator_init(void *dummy);
 
 typedef enum {
 	STATE_OFF,
