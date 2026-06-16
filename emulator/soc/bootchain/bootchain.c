@@ -79,3 +79,105 @@ const char *bootchain_active_stage(void)
 	return "unknown";
 }
 
+void bootchain_request_resume(uint64_t address)
+{
+	resume_address = address;
+	resume_requested = true;
+}
+
+bool bootchain_take_resume_request(uint64_t *address)
+{
+	bool requested = resume_requested;
+
+	if (requested)
+		*address = resume_address;
+	resume_requested = false;
+	return requested;
+}
+
+bool bootchain_handle_system_instruction(uc_engine *uc)
+{
+	return bootchain_cpu_handle_system_instruction(uc);
+}
+
+bool bootchain_handle_invalid_memory(uc_engine *uc, uint64_t address)
+{
+	if (bootchain_cpu_handle_invalid_memory(uc, address))
+		return true;
+	return el3_mon_handle_invalid_memory(uc, address);
+}
+
+bool bootchain_route_smc(uc_engine *uc, uint64_t return_address)
+{
+	if (current_stage == BOOTCHAIN_STAGE_BL2)
+		return epbl_route_smc(uc, return_address);
+	if (current_stage == BOOTCHAIN_STAGE_EL3)
+		return el3_mon_route_runtime_smc(uc, return_address);
+	if (current_stage == BOOTCHAIN_STAGE_LK)
+		return el3_mon_route_smc(uc, return_address);
+	return false;
+}
+
+bool bootchain_route_hvc(uc_engine *uc, uint64_t return_address,
+			 uint16_t immediate)
+{
+	if (current_stage == BOOTCHAIN_STAGE_LK)
+		return el3_mon_route_hvc(uc, return_address, immediate);
+	return false;
+}
+
+bool bootchain_route_svc(uc_engine *uc, uint64_t return_address,
+                         uint16_t immediate)
+{
+	if (current_stage == BOOTCHAIN_STAGE_EL3)
+		return el3_mon_route_svc(uc, return_address, immediate);
+	return false;
+}
+
+bool bootchain_route_undefined_instruction(uc_engine *uc,
+					   uint64_t fault_address)
+{
+	if (current_stage == BOOTCHAIN_STAGE_EL3)
+		return el3_mon_route_undefined_instruction(uc, fault_address);
+	return false;
+}
+
+uc_err bootchain_write_u32(uc_engine *uc, uint64_t address, uint32_t value)
+{
+	return uc_mem_write(uc, address, &value, sizeof(value));
+}
+
+uc_err bootchain_init(uc_engine *uc, const struct bootchain_config *config)
+{
+	uc_err err;
+
+	if (!config || !config->image_directory ||
+	    config->image_directory[0] == '\0')
+		return UC_ERR_ARG;
+	if (!config->lun_directory || config->lun_directory[0] == '\0')
+		return UC_ERR_ARG;
+	bootchain_images_configure(config->image_directory,
+				   config->lun_directory);
+	current_stage = BOOTCHAIN_STAGE_BOOTROM;
+	completed = false;
+	failed = false;
+	resume_requested = false;
+	bootchain_cpu_reset();
+	err = bootchain_images_validate();
+	if (err == UC_ERR_OK)
+		err = bootchain_load_image(uc, BOOTROM_IMAGE, 0,
+					   BOOTROM_IMAGE_SIZE);
+	if (err == UC_ERR_OK)
+		err = bootrom_init(uc);
+	if (err == UC_ERR_OK)
+		err = fwbl1_init(uc);
+	if (err == UC_ERR_OK)
+		err = epbl_init(uc);
+	if (err == UC_ERR_OK)
+		err = bl2_init(uc);
+	if (err == UC_ERR_OK)
+		err = el3_mon_init(uc);
+	if (err == UC_ERR_OK)
+		err = lk_init(uc, config->headless, config->boot_mode);
+	return err;
+}
