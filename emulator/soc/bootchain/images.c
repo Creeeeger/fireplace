@@ -118,3 +118,100 @@ static uc_err bootchain_load_file_range(uc_engine *uc, FILE *file,
 	return err;
 }
 
+static uc_err bootchain_load_profile_image(uc_engine *uc, const char *filename,
+					   uint64_t address,
+					   uint64_t expected_size)
+{
+	char path[PATH_MAX];
+	uc_err err;
+	FILE *file;
+
+	err = bootchain_make_profile_path(path, sizeof(path), filename);
+	if (err != UC_ERR_OK)
+		return err;
+	file = fopen(path, "rb");
+	if (!file) {
+		fprintf(stderr, "Failed to open %s: %s\n", path, strerror(errno));
+		return UC_ERR_HANDLE;
+	}
+	err = bootchain_load_file_range(uc, file, path, 0, address,
+					expected_size);
+	if (err != UC_ERR_OK)
+		goto out;
+	if (fgetc(file) != EOF) {
+		fprintf(stderr,
+			"Bootchain image %s is larger than 0x%" PRIx64 " bytes\n",
+			path, expected_size);
+		err = UC_ERR_ARG;
+	}
+out:
+	if (fclose(file) != 0 && err == UC_ERR_OK) {
+		fprintf(stderr, "Failed to close %s: %s\n", path, strerror(errno));
+		err = UC_ERR_HANDLE;
+	}
+	return err;
+}
+
+uc_err bootchain_read_profile_file(const char *filename, char **data,
+				   size_t *size)
+{
+	char path[PATH_MAX];
+	long file_size;
+	uc_err err;
+	FILE *file;
+	char *buffer;
+
+	err = bootchain_make_profile_path(path, sizeof(path), filename);
+	if (err != UC_ERR_OK)
+		return err;
+	file = fopen(path, "rb");
+	if (!file) {
+		fprintf(stderr, "Failed to open %s: %s\n", path, strerror(errno));
+		return UC_ERR_HANDLE;
+	}
+	if (fseek(file, 0, SEEK_END) != 0) {
+		fprintf(stderr, "Failed to seek %s: %s\n", path,
+			strerror(errno));
+		err = UC_ERR_HANDLE;
+		goto close;
+	}
+	file_size = ftell(file);
+	if (file_size < 0) {
+		fprintf(stderr, "Failed to size %s: %s\n", path,
+			strerror(errno));
+		err = UC_ERR_HANDLE;
+		goto close;
+	}
+	if (fseek(file, 0, SEEK_SET) != 0) {
+		fprintf(stderr, "Failed to rewind %s: %s\n", path,
+			strerror(errno));
+		err = UC_ERR_HANDLE;
+		goto close;
+	}
+	buffer = malloc((size_t)file_size + 1);
+	if (!buffer) {
+		fprintf(stderr, "Failed to allocate %ld bytes for %s\n",
+			file_size, path);
+		err = UC_ERR_NOMEM;
+		goto close;
+	}
+	if (fread(buffer, 1, (size_t)file_size, file) != (size_t)file_size) {
+		fprintf(stderr, "Failed to read %s: %s\n", path,
+			ferror(file) ? strerror(errno) : "short read");
+		free(buffer);
+		err = UC_ERR_HANDLE;
+		goto close;
+	}
+	buffer[file_size] = '\0';
+	*data = buffer;
+	*size = (size_t)file_size;
+	err = UC_ERR_OK;
+close:
+	if (fclose(file) != 0 && err == UC_ERR_OK) {
+		fprintf(stderr, "Failed to close %s: %s\n", path,
+			strerror(errno));
+		err = UC_ERR_HANDLE;
+	}
+	return err;
+}
+
