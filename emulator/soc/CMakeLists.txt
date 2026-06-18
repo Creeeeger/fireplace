@@ -35,6 +35,7 @@ add_library(fireplace_soc STATIC
 
 target_sources(fireplace_soc PRIVATE
 	bootchain/bootchain.c
+	bootchain/crypto.c
 	bootchain/hooks.c
 	bootchain/images.c
 )
