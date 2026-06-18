@@ -215,3 +215,123 @@ close:
 	return err;
 }
 
+static uc_err bootchain_load_ufs_image(uc_engine *uc,
+				       const struct ufs_boot_image *image,
+				       uint64_t address,
+				       uint64_t expected_size)
+{
+	char path[PATH_MAX];
+	char label[PATH_MAX + 96];
+	uc_err err;
+	FILE *file;
+
+	if (expected_size != image->size) {
+		fprintf(stderr, "UFS manifest size mismatch for %s\n",
+			image->filename);
+		return UC_ERR_ARG;
+	}
+	err = bootchain_make_lun_path(path, sizeof(path), image->lun);
+	if (err != UC_ERR_OK)
+		return err;
+	file = fopen(path, "rb");
+	if (!file) {
+		fprintf(stderr, "Failed to open UFS boot LUN %s: %s\n",
+			path, strerror(errno));
+		return UC_ERR_HANDLE;
+	}
+	snprintf(label, sizeof(label), "%s:%s@0x%" PRIx64, path,
+		 image->name, image->offset);
+	err = bootchain_load_file_range(uc, file, label, image->offset, address,
+					expected_size);
+	if (fclose(file) != 0 && err == UC_ERR_OK) {
+		fprintf(stderr, "Failed to close %s: %s\n", path,
+			strerror(errno));
+		err = UC_ERR_HANDLE;
+	}
+	if (err == UC_ERR_OK)
+		printf("[Bootchain UFS] loaded %s from lun%u.img offset 0x%"
+		       PRIx64 "\n", image->name, image->lun, image->offset);
+	return err;
+}
+
+uc_err bootchain_load_image(uc_engine *uc, const char *filename,
+			    uint64_t address, uint64_t expected_size)
+{
+	const struct ufs_boot_image *ufs_image;
+
+	ufs_image = bootchain_find_ufs_image(filename);
+	if (ufs_image)
+		return bootchain_load_ufs_image(uc, ufs_image, address,
+						expected_size);
+	if (strcmp(filename, BOOTROM_IMAGE) == 0 ||
+	    strcmp(filename, EFUSE_IMAGE) == 0)
+		return bootchain_load_profile_image(uc, filename, address,
+						    expected_size);
+	fprintf(stderr, "No UFS manifest entry for bootchain image %s\n",
+		filename);
+	return UC_ERR_ARG;
+}
+
+uc_err bootchain_images_validate(void)
+{
+	uint64_t required_size[5] = {0};
+
+	for (size_t lun = 0; lun < ARRAY_SIZE(required_size); lun++)
+		required_size[lun] = 1;
+	for (size_t i = 0; i < ARRAY_SIZE(ufs_boot_images); i++) {
+		uint64_t end = ufs_boot_images[i].offset + ufs_boot_images[i].size;
+
+		if (ufs_boot_images[i].lun >= ARRAY_SIZE(required_size))
+			return UC_ERR_ARG;
+		if (end > required_size[ufs_boot_images[i].lun])
+			required_size[ufs_boot_images[i].lun] = end;
+	}
+	for (size_t lun = 0; lun < ARRAY_SIZE(required_size); lun++) {
+		char path[PATH_MAX];
+		long file_size;
+		FILE *file;
+		uc_err err;
+
+		if (required_size[lun] == 0)
+			continue;
+		err = bootchain_make_lun_path(path, sizeof(path),
+					      (unsigned int)lun);
+		if (err != UC_ERR_OK)
+			return err;
+		file = fopen(path, "rb");
+		if (!file) {
+			fprintf(stderr, "Failed to open UFS boot LUN %s: %s\n",
+				path, strerror(errno));
+			return UC_ERR_HANDLE;
+		}
+		if (fseek(file, 0, SEEK_END) != 0) {
+			fprintf(stderr, "Failed to size %s: %s\n", path,
+				strerror(errno));
+			fclose(file);
+			return UC_ERR_HANDLE;
+		}
+		file_size = ftell(file);
+		if (file_size < 0) {
+			fprintf(stderr, "Failed to size %s: %s\n", path,
+				strerror(errno));
+			fclose(file);
+			return UC_ERR_HANDLE;
+		}
+		if ((uint64_t)file_size < required_size[lun]) {
+			fprintf(stderr,
+				"UFS boot LUN %s is too small: 0x%lx bytes "
+				"(need at least 0x%" PRIx64 ")\n",
+				path, file_size, required_size[lun]);
+			fclose(file);
+			return UC_ERR_ARG;
+		}
+		if (fclose(file) != 0) {
+			fprintf(stderr, "Failed to close %s: %s\n", path,
+				strerror(errno));
+			return UC_ERR_HANDLE;
+		}
+	}
+	printf("[Bootchain UFS] using Exynos9830 PIT BOOTLOADER manifest\n");
+	return UC_ERR_OK;
+}
+
