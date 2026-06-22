@@ -183,3 +183,177 @@ bool bootchain_cpu_get_system_register(uint32_t instruction, uint64_t *value)
 	return true;
 }
 
+static bool bootchain_cpu_execute_system_instruction(uc_engine *uc,
+						    uint32_t instruction,
+						    uint64_t next_pc)
+{
+	uc_arm64_cp_reg reg;
+	struct system_register *entry;
+	unsigned int general_register;
+	bool read;
+
+	/*
+	 * Unicorn's hidden exception level does not follow PSTATE values written
+	 * by the software EL3/HVC dispatcher.  MRS CurrentEL would consequently
+	 * report EL0 after returning to LK even though PSTATE.M is EL1h, causing
+	 * LK's final mmu_disable() assertion to panic.  CurrentEL is architecturally
+	 * the current PSTATE exception level in bits [3:2], so derive it from the
+	 * same visible PSTATE that the dispatcher saves and restores.
+	 */
+	if ((instruction & UINT32_C(0xffffffe0)) == MRS_CURRENTEL) {
+		uint64_t pstate = 0;
+		uint64_t current_el;
+		unsigned int destination = instruction & 31;
+
+		if (uc_reg_read(uc, UC_ARM64_REG_PSTATE, &pstate) != UC_ERR_OK)
+			return false;
+		current_el = pstate & UINT64_C(0xc);
+		if (destination != 31 &&
+		    uc_reg_write(uc, cpu_x_register(destination), &current_el) !=
+			UC_ERR_OK)
+			return false;
+		return uc_reg_write(uc, UC_ARM64_REG_PC, &next_pc) == UC_ERR_OK;
+	}
+
+	/*
+	 * Unicorn does not keep SPSel and the ordinary SP bank coherent.
+	 * Preserve the architectural bank selection in PSTATE.M[0] and the
+	 * selected SP_EL0/SP_ELx value through the ordinary SP register.
+	 */
+	if (instruction == UINT32_C(0xd50040bf) ||
+	    instruction == UINT32_C(0xd50041bf) ||
+	    (instruction & UINT32_C(0xffffffe0)) ==
+		UINT32_C(0xd5184200)) {
+		uint64_t pstate = 0;
+		uint64_t current_sp = 0;
+		uint64_t target_sp = 0;
+		uint64_t select = 0;
+		unsigned int current_el;
+		unsigned int general_register = instruction & 31;
+		uc_arm64_reg current_bank;
+		uc_arm64_reg target_bank;
+
+		if (uc_reg_read(uc, UC_ARM64_REG_PSTATE, &pstate) != UC_ERR_OK ||
+		    uc_reg_read(uc, UC_ARM64_REG_SP, &current_sp) != UC_ERR_OK)
+			return false;
+		if (instruction == UINT32_C(0xd50041bf)) {
+			select = 1;
+		} else if ((instruction & UINT32_C(0xffffffe0)) ==
+			   UINT32_C(0xd5184200) &&
+			   general_register != 31 &&
+			   uc_reg_read(uc, cpu_x_register(general_register), &select) !=
+				UC_ERR_OK) {
+			return false;
+		}
+		select &= UINT64_C(1);
+		if ((pstate & UINT64_C(1)) == select)
+			return uc_reg_write(uc, UC_ARM64_REG_PC, &next_pc) ==
+			       UC_ERR_OK;
+
+		current_el = (unsigned int)((pstate >> 2) & UINT64_C(3));
+		if (current_el == 0)
+			return false;
+		current_bank = (pstate & UINT64_C(1)) == 0 ?
+			UC_ARM64_REG_SP_EL0 :
+			(uc_arm64_reg)(UC_ARM64_REG_SP_EL0 + current_el);
+		target_bank = select == 0 ?
+			UC_ARM64_REG_SP_EL0 :
+			(uc_arm64_reg)(UC_ARM64_REG_SP_EL0 + current_el);
+
+		if (uc_reg_write(uc, current_bank, &current_sp) != UC_ERR_OK ||
+		    uc_reg_read(uc, target_bank, &target_sp) != UC_ERR_OK)
+			return false;
+		pstate = (pstate & ~UINT64_C(1)) | select;
+		return uc_reg_write(uc, UC_ARM64_REG_PSTATE, &pstate) == UC_ERR_OK &&
+		       uc_reg_write(uc, UC_ARM64_REG_SP, &target_sp) == UC_ERR_OK &&
+		       uc_reg_write(uc, UC_ARM64_REG_PC, &next_pc) == UC_ERR_OK;
+	}
+
+	if ((instruction & UINT32_C(0xffffffe0)) ==
+	    UINT32_C(0xd5384200)) {
+		uint64_t pstate = 0;
+		uint64_t select;
+		unsigned int general_register = instruction & 31;
+
+		if (uc_reg_read(uc, UC_ARM64_REG_PSTATE, &pstate) != UC_ERR_OK)
+			return false;
+		select = pstate & UINT64_C(1);
+		if (general_register != 31 &&
+		    uc_reg_write(uc, cpu_x_register(general_register), &select) !=
+			UC_ERR_OK)
+			return false;
+		return uc_reg_write(uc, UC_ARM64_REG_PC, &next_pc) == UC_ERR_OK;
+	}
+
+    if (is_system_maintenance_instruction(instruction)) {
+		if (bootchain_stage() == BOOTCHAIN_STAGE_KERNEL &&
+		    is_tlb_invalidation_instruction(instruction) &&
+		    !cpu_mmu_invalidate_aliases(uc))
+			return false;
+		return uc_reg_write(uc, UC_ARM64_REG_PC, &next_pc) ==
+		       UC_ERR_OK;
+	}
+	if ((instruction & UINT32_C(0xfff00000)) == UINT32_C(0xd5300000))
+		read = true;
+	else if ((instruction & UINT32_C(0xfff00000)) == UINT32_C(0xd5100000))
+		read = false;
+	else
+		return false;
+
+	reg = decode_system_register(instruction);
+	entry = find_system_register(&reg);
+	general_register = instruction & 31;
+	if (!entry)
+		return false;
+	if (read) {
+		uint64_t value = entry->value;
+
+		if (general_register != 31 &&
+		    uc_reg_write(uc, cpu_x_register(general_register), &value) !=
+			UC_ERR_OK)
+			return false;
+	} else {
+		uint64_t value = 0;
+
+		/* MSR ..., XZR architecturally writes zero. */
+		if (general_register != 31 &&
+		    uc_reg_read(uc, cpu_x_register(general_register), &value) !=
+			UC_ERR_OK) {
+			return false;
+		}
+		if (bootchain_stage() == BOOTCHAIN_STAGE_KERNEL &&
+		    value != entry->value &&
+		    is_stage1_control_register(instruction) &&
+		    !cpu_mmu_invalidate_aliases(uc))
+			return false;
+		entry->value = value;
+	}
+
+	return uc_reg_write(uc, UC_ARM64_REG_PC, &next_pc) == UC_ERR_OK;
+}
+
+bool bootchain_cpu_handle_system_instruction(uc_engine *uc)
+{
+	enum bootchain_stage stage = bootchain_stage();
+	uint64_t pc;
+	uint32_t instruction;
+
+	if (uc_reg_read(uc, UC_ARM64_REG_PC, &pc) != UC_ERR_OK)
+		return false;
+	if (!(stage == BOOTCHAIN_STAGE_BOOTROM && pc < UINT64_C(0x20000)) &&
+	    stage != BOOTCHAIN_STAGE_EPBL &&
+	    !(stage == BOOTCHAIN_STAGE_BL2 && pc >= EPBL_LOAD_ADDR &&
+	      pc < UINT64_C(0x02033000)) &&
+	    stage != BOOTCHAIN_STAGE_EL3 && stage != BOOTCHAIN_STAGE_LK &&
+	    stage != BOOTCHAIN_STAGE_KERNEL)
+		return false;
+	if (uc_mem_read(uc, pc, &instruction, sizeof(instruction)) ==
+		UC_ERR_OK &&
+	    bootchain_cpu_execute_system_instruction(uc, instruction, pc + 4))
+		return true;
+	if (pc < 4 ||
+	    uc_mem_read(uc, pc - 4, &instruction, sizeof(instruction)) !=
+		UC_ERR_OK)
+		return false;
+	return bootchain_cpu_execute_system_instruction(uc, instruction, pc);
+}
