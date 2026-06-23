@@ -38,6 +38,7 @@ target_sources(fireplace_soc PRIVATE
 	bootchain/crypto.c
 	bootchain/cpu.c
 	bootchain/cpu_lse.c
+	bootchain/cpu_mmu.c
 	bootchain/cpu_system.c
 	bootchain/hooks.c
 	bootchain/images.c
