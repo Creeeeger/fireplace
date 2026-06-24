@@ -155,3 +155,49 @@ address_size_fault:
     return false;
 }
 
+static struct kernel_alias_page *find_kernel_alias(uint64_t va)
+{
+    uint64_t page = va & ~UINT64_C(0xfff);
+
+    for (size_t i = 0; i < kernel_alias_page_count; i++)
+        if (kernel_alias_pages[i].va == page)
+            return &kernel_alias_pages[i];
+    return NULL;
+}
+
+static bool remember_kernel_alias(uint64_t va, uint64_t pa)
+{
+    struct kernel_alias_page *alias = find_kernel_alias(va);
+
+    va &= ~UINT64_C(0xfff);
+    pa &= ~UINT64_C(0xfff);
+    if (alias) {
+        alias->pa = pa;
+        return true;
+    }
+    if (kernel_alias_page_count == KERNEL_ALIAS_PAGE_CAPACITY)
+        return false;
+    kernel_alias_pages[kernel_alias_page_count++] =
+        (struct kernel_alias_page) { .va = va, .pa = pa };
+    return true;
+}
+
+bool cpu_mmu_invalidate_aliases(uc_engine *uc)
+{
+    for (size_t i = 0; i < kernel_alias_page_count; i++) {
+        uint64_t va = kernel_alias_pages[i].va;
+        uc_err err = uc_mem_unmap(uc, va, 0x1000);
+
+        if (err != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[Kernel MMU] failed to invalidate shadow page"
+                    " VA=0x%016" PRIx64 ": %s\n",
+                    va, uc_strerror(err));
+            return false;
+        }
+    }
+
+    kernel_alias_page_count = 0;
+    return uc_ctl_flush_tb(uc) == UC_ERR_OK;
+}
+
