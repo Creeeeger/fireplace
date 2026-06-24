@@ -201,3 +201,174 @@ bool cpu_mmu_invalidate_aliases(uc_engine *uc)
     return uc_ctl_flush_tb(uc) == UC_ERR_OK;
 }
 
+static bool publish_kernel_alias_bytes(uc_engine *uc, uint64_t address,
+                                       const uint8_t *bytes, size_t size)
+{
+    kernel_alias_sync_active = true;
+    while (size != 0) {
+        struct kernel_alias_page *source = find_kernel_alias(address);
+        uint64_t offset = address & UINT64_C(0xfff);
+        uint64_t pa;
+        uint64_t pa_page;
+        size_t chunk = 0x1000 - (size_t)offset;
+        uc_err err;
+
+        if (source) {
+            pa = source->pa + offset;
+        } else if ((address & (UINT64_C(1) << 63)) != 0) {
+            unsigned int fault_status;
+
+            /*
+             * Unicorn invokes the ordinary write hook before its invalid-
+             * memory hook.  The first store to a valid high kernel VA can
+             * therefore arrive before that VA page has been shadow-mapped
+             * and recorded in kernel_alias_pages.  Resolve the live EL1
+             * mapping here and publish only to its physical backing.  The
+             * following invalid-memory callback will create the VA shadow
+             * and remember the alias before Unicorn retries the store.
+             */
+            if (!cpu_mmu_translate_el1(uc, address, true, &pa,
+                                      &fault_status)) {
+                fprintf(stderr,
+                        "[Kernel MMU] failed to translate first write"
+                        " VA=0x%016" PRIx64 " FST=0x%x\n",
+                        address, fault_status);
+                goto fail;
+            }
+        } else {
+            pa = address;
+        }
+        pa_page = pa & ~UINT64_C(0xfff);
+
+        if (chunk > size)
+            chunk = size;
+        err = uc_mem_write(uc, pa, bytes, chunk);
+        if (err != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[Kernel MMU] backing write failed"
+                    " VA=0x%016" PRIx64
+                    " PA=0x%016" PRIx64
+                    " size=%zu: %s\n",
+                    address, pa, chunk, uc_strerror(err));
+            goto fail;
+        }
+        for (size_t i = 0; i < kernel_alias_page_count; i++) {
+            const struct kernel_alias_page *alias = &kernel_alias_pages[i];
+
+            if (alias->pa != pa_page)
+                continue;
+            err = uc_mem_write(uc, alias->va + offset, bytes, chunk);
+            if (err != UC_ERR_OK) {
+                fprintf(stderr,
+                        "[Kernel MMU] alias write failed"
+                        " VA=0x%016" PRIx64
+                        " PA=0x%016" PRIx64
+                        " size=%zu: %s\n",
+                        alias->va + offset, pa, chunk,
+                        uc_strerror(err));
+                goto fail;
+            }
+        }
+        address += chunk;
+        bytes += chunk;
+        size -= chunk;
+    }
+    kernel_alias_sync_active = false;
+    return true;
+
+fail:
+    kernel_alias_sync_active = false;
+    return false;
+}
+
+bool cpu_mmu_flush_pending_writes(uc_engine *uc)
+{
+    uint8_t bytes[64];
+
+    for (size_t i = 0; i < kernel_pending_write_count; i++) {
+        const struct kernel_pending_write *pending =
+            &kernel_pending_writes[i];
+
+        if (pending->size > sizeof(bytes) ||
+            uc_mem_read(uc, pending->address, bytes, pending->size) !=
+                UC_ERR_OK ||
+            !publish_kernel_alias_bytes(uc, pending->address, bytes,
+                                        pending->size))
+            return false;
+    }
+    kernel_pending_write_count = 0;
+    return true;
+}
+
+void cpu_mmu_write_cb(uc_engine *uc, uc_mem_type type,
+                            uint64_t address, int size, int64_t value,
+                            void *user_data)
+{
+    uint8_t bytes[sizeof(value)];
+
+    (void)type;
+    (void)user_data;
+    if (bootchain_stage() != BOOTCHAIN_STAGE_KERNEL ||
+        kernel_alias_sync_active || size <= 0)
+        return;
+
+    if ((size_t)size <= sizeof(value)) {
+        memcpy(bytes, &value, (size_t)size);
+        if (!publish_kernel_alias_bytes(uc, address, bytes, (size_t)size))
+            bootchain_fail(uc);
+        return;
+    }
+
+    if ((size_t)size > 64 ||
+        kernel_pending_write_count == KERNEL_PENDING_WRITE_CAPACITY) {
+        fprintf(stderr, "[Kernel MMU] unsupported wide store size=%d\n",
+                size);
+        bootchain_fail(uc);
+        return;
+    }
+    kernel_pending_writes[kernel_pending_write_count++] =
+        (struct kernel_pending_write) {
+            .address = address,
+            .size = (uint32_t)size,
+        };
+}
+
+bool bootchain_cpu_handle_invalid_memory(uc_engine *uc, uint64_t address)
+{
+    uint8_t page[0x1000];
+    uint64_t virtual_page = address & ~UINT64_C(0xfff);
+    uint64_t physical_address;
+    uint64_t physical_page;
+    unsigned int fault_status;
+    uc_err err;
+
+    if (bootchain_stage() != BOOTCHAIN_STAGE_KERNEL)
+        return false;
+    if (!cpu_mmu_translate_el1(uc, virtual_page, false,
+                              &physical_address, &fault_status))
+        return false;
+
+    physical_page = physical_address & ~UINT64_C(0xfff);
+    if (physical_page == virtual_page ||
+        uc_mem_read(uc, physical_page, page, sizeof(page)) != UC_ERR_OK)
+        return false;
+
+    err = uc_mem_map(uc, virtual_page, sizeof(page), UC_PROT_ALL);
+    if (err != UC_ERR_OK)
+        return false;
+    err = uc_mem_write(uc, virtual_page, page, sizeof(page));
+    if (err != UC_ERR_OK ||
+        !remember_kernel_alias(virtual_page, physical_page)) {
+        (void)uc_mem_unmap(uc, virtual_page, sizeof(page));
+        return false;
+    }
+
+    return true;
+}
+
+void cpu_mmu_reset(void)
+{
+	kernel_alias_page_count = 0;
+	kernel_pending_write_count = 0;
+	kernel_alias_sync_active = false;
+}
