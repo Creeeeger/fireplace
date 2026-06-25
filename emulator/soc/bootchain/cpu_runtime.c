@@ -99,3 +99,195 @@ static bool is_virtualized_system_register(enum bootchain_stage stage,
 	return false;
 }
 
+static void instruction_cb(uc_engine *uc, uint64_t address, uint32_t size,
+                           void *user_data)
+{
+    enum bootchain_stage stage = bootchain_stage();
+    uint32_t instruction;
+    bool translated_instruction = false;
+
+    (void)size;
+    (void)user_data;
+
+    /* The compatibility decoder is needed only once EL3 starts. Keeping the
+     * hook dormant during BootROM, FWBL1, EPBL, and BL2 avoids a guest-memory
+     * read for every instruction in the early boot chain. */
+    if (stage != BOOTCHAIN_STAGE_EL3 &&
+        stage != BOOTCHAIN_STAGE_LK &&
+        stage != BOOTCHAIN_STAGE_KERNEL)
+        return;
+
+    if (stage == BOOTCHAIN_STAGE_KERNEL &&
+        !cpu_mmu_flush_pending_writes(uc)) {
+        fprintf(stderr, "[Kernel MMU] failed to publish wide store\n");
+        bootchain_fail(uc);
+        return;
+    }
+
+    /*
+     * uc_mem_read() addresses Unicorn's flat backing store; it does not
+     * follow the SecureOS EL0 task's current TTBR0 mapping.  The same low
+     * virtual address is reused by multiple handler tasks, so its identity
+     * shadow can be stale after a context switch.  Decode through the live
+     * page tables before looking for SVC and other trapped instructions.
+     */
+    if (stage == BOOTCHAIN_STAGE_EL3 &&
+        el3_mon_secure_os_active()) {
+        translated_instruction =
+            el3_mon_read_secure_os_instruction(
+                uc, address, &instruction);
+    }
+
+    if (!translated_instruction &&
+        uc_mem_read(uc, address, &instruction,
+                    sizeof(instruction)) != UC_ERR_OK)
+        return;
+
+    /*
+     * Route SMC instructions from LK or the SecureOS runtime represented
+     * by BOOTCHAIN_STAGE_EL3.
+     */
+    if ((stage == BOOTCHAIN_STAGE_LK ||
+         stage == BOOTCHAIN_STAGE_EL3) &&
+        instruction == UINT32_C(0xd4000003) &&
+        bootchain_route_smc(uc, address + 4)) {
+        return;
+    }
+
+    if (stage == BOOTCHAIN_STAGE_LK &&
+        (instruction & UINT32_C(0xffe0001f)) ==
+            UINT32_C(0xd4000002) &&
+        bootchain_route_hvc(
+            uc, address + 4,
+            (uint16_t)((instruction >> 5) & UINT32_C(0xffff)))) {
+        return;
+    }
+
+    if (stage == BOOTCHAIN_STAGE_EL3 &&
+        (instruction & UINT32_C(0xffe0001f)) ==
+            UINT32_C(0xd4000001) &&
+        bootchain_route_svc(
+            uc, address + 4,
+            (uint16_t)((instruction >> 5) & UINT32_C(0xffff)))) {
+        return;
+    }
+
+    if (stage != BOOTCHAIN_STAGE_LK &&
+        stage != BOOTCHAIN_STAGE_KERNEL &&
+        stage != BOOTCHAIN_STAGE_EL3)
+        return;
+
+    /*
+     * Unicorn raises an undefined-instruction exception for the ARMv8.1
+     * LSE atomics used by the H-Arx plug-in.  Execute the architectural
+     * read-modify-write before Unicorn enters that exception path.
+     */
+    if (stage == BOOTCHAIN_STAGE_EL3 &&
+        cpu_is_lse_ldadd_instruction(instruction)) {
+        if (!cpu_emulate_lse_ldadd(uc, address, instruction)) {
+            fprintf(stderr,
+                    "[CPU] failed to emulate LSE LDADD at 0x%" PRIx64
+                    " instruction=0x%08" PRIx32 "\n",
+                    address, instruction);
+            bootchain_fail(uc);
+            return;
+        }
+
+        bootchain_request_resume(address + 4);
+        uc_emu_stop(uc);
+        return;
+    }
+
+    /*
+     * Unicorn does not implement the AT instructions used by H-Arx/UH.
+     * Walk the live EL1 translation tables and publish the architectural
+     * result through PAR_EL1 before the following MRS executes.
+     */
+    if (address_translation_name(instruction) != NULL) {
+        if (!emulate_address_translation(uc, address, instruction)) {
+            fprintf(stderr,
+                    "[CPU hook] failed to emulate AT at 0x%" PRIx64
+                    " instruction=0x%08" PRIx32 "\n",
+                    address, instruction);
+            bootchain_fail(uc);
+            return;
+        }
+
+        bootchain_request_resume(address + 4);
+        uc_emu_stop(uc);
+        return;
+    }
+
+    /*
+     * Unicorn executes SPSel without keeping the ordinary SP and the
+     * selected SP_EL0/SP_ELx bank coherent.  Intercept both immediate
+     * and register forms before Unicorn executes them so nested EL3
+     * frames survive a temporary stack-bank switch.
+     */
+    if (stage == BOOTCHAIN_STAGE_EL3 &&
+        (instruction == UINT32_C(0xd50040bf) ||
+         instruction == UINT32_C(0xd50041bf) ||
+         (instruction & UINT32_C(0xffffffe0)) ==
+             UINT32_C(0xd5184200) ||
+         (instruction & UINT32_C(0xffffffe0)) ==
+             UINT32_C(0xd5384200))) {
+        if (!bootchain_cpu_handle_system_instruction(uc)) {
+            fprintf(stderr,
+                    "[CPU] failed to virtualize SPSel at 0x%" PRIx64
+                    "\n",
+                    address);
+            bootchain_fail(uc);
+            return;
+        }
+
+        bootchain_request_resume(address + 4);
+        uc_emu_stop(uc);
+        return;
+    }
+
+    if (stage == BOOTCHAIN_STAGE_EL3 &&
+        el3_mon_secure_os_active() &&
+        is_ic_ivau_instruction(instruction)) {
+        const uint32_t nop = UINT32_C(0xd503201f);
+        uc_err err;
+
+        err = uc_mem_write(uc, address, &nop, sizeof(nop));
+        if (err != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[CPU] failed to patch SecureOS IC IVAU "
+                    "at 0x%" PRIx64 ": %s\n",
+                    address, uc_strerror(err));
+            bootchain_fail(uc);
+            return;
+        }
+
+        err = uc_ctl_flush_tb(uc);
+        if (err != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[CPU] failed to flush TB after patching "
+                    "SecureOS IC IVAU at 0x%" PRIx64 ": %s\n",
+                    address, uc_strerror(err));
+            bootchain_fail(uc);
+            return;
+        }
+
+        /*
+         * Restart at the same address. The instruction there is now NOP.
+         */
+        bootchain_request_resume(address);
+        uc_emu_stop(uc);
+        return;
+    }
+
+    if (is_virtualized_system_register(stage, instruction)) {
+        if (!bootchain_cpu_handle_system_instruction(uc)) {
+            bootchain_fail(uc);
+            return;
+        }
+
+        bootchain_request_resume(address + 4);
+        uc_emu_stop(uc);
+        return;
+    }
+}
+
