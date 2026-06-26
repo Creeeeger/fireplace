@@ -291,3 +291,33 @@ static void instruction_cb(uc_engine *uc, uint64_t address, uint32_t size,
     }
 }
 
+void cpu_runtime_reset(void)
+{
+	runtime_hooks_installed = false;
+	kernel_write_hook_installed = false;
+}
+
+uc_err bootchain_cpu_prepare_stage(uc_engine *uc,
+				   enum bootchain_stage stage)
+{
+	const struct bootchain_hook runtime_hook =
+		BOOTCHAIN_HOOK_RANGE(UC_HOOK_CODE, instruction_cb, 1, 0);
+	const struct bootchain_hook kernel_write_hook =
+		BOOTCHAIN_HOOK_RANGE(UC_HOOK_MEM_WRITE, cpu_mmu_write_cb, 1, 0);
+	uc_err err;
+
+	if (stage >= BOOTCHAIN_STAGE_EL3 && !runtime_hooks_installed) {
+		err = bootchain_install_hooks(uc, &runtime_hook, 1);
+		if (err != UC_ERR_OK)
+			return err;
+		runtime_hooks_installed = true;
+	}
+	if (stage == BOOTCHAIN_STAGE_KERNEL && !kernel_write_hook_installed) {
+		err = bootchain_install_hooks(uc, &kernel_write_hook, 1);
+		if (err != UC_ERR_OK)
+			return err;
+		kernel_write_hook_installed = true;
+	}
+	return UC_ERR_OK;
+}
+
