@@ -43,6 +43,8 @@ target_sources(fireplace_soc PRIVATE
 	bootchain/cpu_system.c
 	bootchain/hooks.c
 	bootchain/images.c
+	bootrom/bootrom.c
+	bootrom/fuses.c
 )
 
 target_include_directories(fireplace_soc PRIVATE
