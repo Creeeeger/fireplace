@@ -119,3 +119,71 @@ static int hex_digit_value(char c)
 	return -1;
 }
 
+static struct bootrom_fuse_region *find_fuse_region(uint64_t address,
+						    size_t size)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(fuse_regions); i++)
+		if (fuse_regions[i].address == address &&
+		    fuse_regions[i].size == size)
+			return &fuse_regions[i];
+	return NULL;
+}
+
+static uc_err parse_fuse_bytes(const char *line, unsigned int line_no,
+			       uint8_t *output, size_t expected_size)
+{
+	size_t bytes = 0;
+	int high = -1;
+
+	while (isspace((unsigned char)*line) && *line != '\n')
+		line++;
+	if (strncmp(line, "zero", 4) == 0 &&
+	    (line[4] == '\0' || line[4] == '\n' || line[4] == '#' ||
+	     isspace((unsigned char)line[4]))) {
+		memset(output, 0, expected_size);
+		return UC_ERR_OK;
+	}
+
+	for (const char *p = line; *p && *p != '\n'; p++) {
+		int digit;
+
+		if (*p == '#')
+			break;
+		if (isspace((unsigned char)*p))
+			continue;
+		digit = hex_digit_value(*p);
+		if (digit < 0) {
+			fprintf(stderr,
+				"[BootROM] invalid hex byte on %s line %u\n",
+				BOOTROM_FUSE_STATE_IMAGE, line_no);
+			return UC_ERR_ARG;
+		}
+		if (high < 0) {
+			high = digit;
+			continue;
+		}
+		if (bytes == expected_size) {
+			fprintf(stderr,
+				"[BootROM] too many bytes on %s line %u\n",
+				BOOTROM_FUSE_STATE_IMAGE, line_no);
+			return UC_ERR_ARG;
+		}
+		output[bytes++] = (uint8_t)((high << 4) | digit);
+		high = -1;
+	}
+	if (high >= 0) {
+		fprintf(stderr,
+			"[BootROM] odd hex digit count on %s line %u\n",
+			BOOTROM_FUSE_STATE_IMAGE, line_no);
+		return UC_ERR_ARG;
+	}
+	if (bytes != expected_size) {
+		fprintf(stderr,
+			"[BootROM] %s line %u has 0x%zx bytes, expected 0x%zx\n",
+			BOOTROM_FUSE_STATE_IMAGE, line_no, bytes,
+			expected_size);
+		return UC_ERR_ARG;
+	}
+	return UC_ERR_OK;
+}
+
