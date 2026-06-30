@@ -44,6 +44,7 @@ target_sources(fireplace_soc PRIVATE
 	bootchain/hooks.c
 	bootchain/images.c
 	bootrom/bootrom.c
+	bootrom/auth.c
 	bootrom/fuses.c
 )
 
