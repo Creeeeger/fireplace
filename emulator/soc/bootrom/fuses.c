@@ -187,3 +187,106 @@ static uc_err parse_fuse_bytes(const char *line, unsigned int line_no,
 	return UC_ERR_OK;
 }
 
+static uc_err load_fuse_state_line(uc_engine *uc, const char *line,
+				   unsigned int line_no)
+{
+	struct bootrom_fuse_region *region;
+	unsigned long long address;
+	unsigned long long size;
+	uint8_t *bytes;
+	char *end;
+	uc_err err;
+
+	while (isspace((unsigned char)*line) && *line != '\n')
+		line++;
+	if (*line == '\0' || *line == '\n' || *line == '#')
+		return UC_ERR_OK;
+	address = strtoull(line, &end, 0);
+	if (end == line) {
+		fprintf(stderr, "[BootROM] missing address on %s line %u\n",
+			BOOTROM_FUSE_STATE_IMAGE, line_no);
+		return UC_ERR_ARG;
+	}
+	line = end;
+	size = strtoull(line, &end, 0);
+	if (end == line || size > SIZE_MAX) {
+		fprintf(stderr, "[BootROM] missing size on %s line %u\n",
+			BOOTROM_FUSE_STATE_IMAGE, line_no);
+		return UC_ERR_ARG;
+	}
+	region = find_fuse_region((uint64_t)address, (size_t)size);
+	if (!region) {
+		fprintf(stderr,
+			"[BootROM] unexpected region 0x%08llx size 0x%llx "
+			"on %s line %u\n",
+			address, size, BOOTROM_FUSE_STATE_IMAGE, line_no);
+		return UC_ERR_ARG;
+	}
+	if (region->loaded) {
+		fprintf(stderr,
+			"[BootROM] duplicate region 0x%08" PRIx64
+			" on %s line %u\n",
+			region->address, BOOTROM_FUSE_STATE_IMAGE, line_no);
+		return UC_ERR_ARG;
+	}
+	bytes = malloc(region->size);
+	if (!bytes)
+		return UC_ERR_NOMEM;
+	err = parse_fuse_bytes(end, line_no, bytes, region->size);
+	if (err == UC_ERR_OK && region->reject_empty &&
+	    bootrom_bytes_are_empty(bytes, region->size)) {
+		fprintf(stderr,
+			"[BootROM] %s at 0x%08" PRIx64
+			" is all-zero/all-0xff\n",
+			region->name, region->address);
+		err = UC_ERR_ARG;
+	}
+	if (err == UC_ERR_OK)
+		err = uc_mem_write(uc, region->address, bytes, region->size);
+	free(bytes);
+	if (err != UC_ERR_OK)
+		return err;
+	region->loaded = true;
+	return UC_ERR_OK;
+}
+
+uc_err bootrom_fuses_load(uc_engine *uc)
+{
+	unsigned int line_no = 1;
+	char *contents;
+	size_t size;
+	uc_err err;
+
+	for (size_t i = 0; i < ARRAY_SIZE(fuse_regions); i++)
+		fuse_regions[i].loaded = false;
+	err = bootchain_read_profile_file(BOOTROM_FUSE_STATE_IMAGE, &contents,
+					  &size);
+	if (err != UC_ERR_OK) {
+		bootrom_print_missing_fuse_state("missing profile fuse/register dump");
+		return err;
+	}
+	for (const char *line = contents; *line;) {
+		err = load_fuse_state_line(uc, line, line_no);
+		if (err != UC_ERR_OK)
+			goto out;
+		while (*line && *line++ != '\n')
+			;
+		line_no++;
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(fuse_regions); i++) {
+		if (!fuse_regions[i].loaded) {
+			fprintf(stderr,
+				"[BootROM] missing 0x%08" PRIx64
+				" size 0x%zx in %s\n",
+				fuse_regions[i].address, fuse_regions[i].size,
+				BOOTROM_FUSE_STATE_IMAGE);
+			err = UC_ERR_ARG;
+			goto out;
+		}
+	}
+	printf("[BootROM] loaded SoC fuse/register state from %s\n",
+	       BOOTROM_FUSE_STATE_IMAGE);
+out:
+	free(contents);
+	return err;
+}
