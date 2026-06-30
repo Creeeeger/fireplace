@@ -104,3 +104,89 @@ static uc_err select_auth_context(uc_engine *uc, uint32_t *address,
 	return UC_ERR_OK;
 }
 
+uc_err bootrom_auth_install(uc_engine *uc)
+{
+	uc_err err;
+
+	err = select_auth_context(uc, &active_auth_context_addr,
+				  &secure_boot_mode);
+	if (err == UC_ERR_OK)
+		err = bootchain_write_u32(uc, ACTIVE_AUTH_CTX_PTR_ADDR,
+					  active_auth_context_addr);
+	if (err == UC_ERR_OK && !auth_context_logged) {
+		printf("[BootROM] installed active auth context pointer at 0x%"
+		       PRIx64 "\n", ACTIVE_AUTH_CTX_PTR_ADDR);
+		auth_context_logged = true;
+	}
+	return err;
+}
+
+uc_err bootrom_auth_install_fwbl1_services(uc_engine *uc)
+{
+	const uint32_t ret_instruction = UINT32_C(0xd65f03c0);
+	const struct {
+		uint64_t slot;
+		uint32_t stub;
+	} callbacks[] = {
+		{SECURE_AUTH_FN_ADDR, BOOTROM_STUB_SECURE_AUTH},
+		{FW_SERVICE_SEND_FN_ADDR, BOOTROM_STUB_SEND},
+		{FW_SERVICE_RECEIVE_FN_ADDR, BOOTROM_STUB_RECEIVE},
+		{HASH_FN_ADDR, BOOTROM_STUB_HASH},
+		{SET_REGISTERS_FN_ADDR, BOOTROM_STUB_SET_REGS},
+		{HASH_MODE_FN_ADDR, BOOTROM_STUB_HASH_MODE},
+	};
+
+	for (size_t i = 0; i < ARRAY_SIZE(callbacks); i++) {
+		uc_err err = bootchain_write_u32(uc, callbacks[i].slot,
+						 callbacks[i].stub);
+
+		if (err == UC_ERR_OK)
+			err = bootchain_write_u32(uc, callbacks[i].stub,
+						  ret_instruction);
+		if (err != UC_ERR_OK)
+			return err;
+	}
+	return UC_ERR_OK;
+}
+
+void bootrom_auth_report_mode(uc_engine *uc)
+{
+	uint32_t auth_context_ptr;
+	uc_err err;
+
+	err = uc_mem_read(uc, ACTIVE_AUTH_CTX_PTR_ADDR, &auth_context_ptr,
+			  sizeof(auth_context_ptr));
+	if (err != UC_ERR_OK) {
+		fprintf(stderr,
+			"[BootROM] failed to read active auth context pointer: "
+			"%s\n",
+			uc_strerror(err));
+		bootchain_fail(uc);
+		return;
+	}
+	if (auth_context_ptr != active_auth_context_addr) {
+		fprintf(stderr,
+			"[BootROM] active auth context pointer 0x%08" PRIx32
+			" does not match selected context 0x%08" PRIx32
+			"\n",
+			auth_context_ptr, active_auth_context_addr);
+		bootrom_print_missing_fuse_state(
+			"BootROM did not publish a valid active auth context");
+		bootchain_fail(uc);
+		return;
+	}
+	err = validate_auth_context(uc, auth_context_ptr);
+	if (err != UC_ERR_OK) {
+		bootchain_fail(uc);
+		return;
+	}
+	if (!secure_mode_logged) {
+		printf("[BootROM] FWBL1 secure boot mode uses eFuse auth "
+		       "context at 0x%08" PRIx32 "\n",
+		       auth_context_ptr);
+		secure_mode_logged = true;
+	}
+	if (uc_reg_write(uc, UC_ARM64_REG_X0, &secure_boot_mode) != UC_ERR_OK)
+		bootchain_fail(uc);
+}
+
