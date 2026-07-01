@@ -112,3 +112,123 @@ static void receive_fwbl1_cb(uc_engine *uc, uint64_t address, uint32_t size,
 	printf("[BootROM] loaded FWBL1 at 0x%" PRIx64 "\n", FWBL1_LOAD_ADDR);
 }
 
+static void jump_fwbl1_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			  void *user_data)
+{
+	uc_err err;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (!bootrom_image_hook_active())
+		return;
+	err = bootrom_auth_install_fwbl1_services(uc);
+	if (err == UC_ERR_OK)
+		err = bootchain_write_u32(uc, BOOT_DEVICE_WORD_ADDR,
+					  BOOT_DEVICE_UFS_WORD);
+	if (err != UC_ERR_OK) {
+		fprintf(stderr, "[BootROM] failed to publish FWBL1 services: %s\n",
+			uc_strerror(err));
+		bootchain_fail(uc);
+		return;
+	}
+	if (!bootchain_transition(uc, BOOTCHAIN_STAGE_BOOTROM,
+				  BOOTCHAIN_STAGE_FWBL1))
+		return;
+	bootchain_request_resume(FWBL1_ENTRY_ADDR);
+	printf("[BootROM] FWBL1 handoff reached\n");
+	uc_emu_stop(uc);
+}
+
+static void auth_ready_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			  void *user_data)
+{
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (!bootrom_image_hook_active())
+		return;
+	if (bootrom_auth_install(uc) != UC_ERR_OK) {
+		fprintf(stderr, "[BootROM] failed to install eFuse context\n");
+		bootchain_fail(uc);
+	}
+}
+
+static void print_firmware_console_data(uc_engine *uc)
+{
+	uint64_t source;
+	uint64_t length;
+	char buffer[513];
+
+	if (uc_reg_read(uc, UC_ARM64_REG_X0, &source) != UC_ERR_OK ||
+	    uc_reg_read(uc, UC_ARM64_REG_X1, &length) != UC_ERR_OK ||
+	    length > sizeof(buffer) - 1 ||
+	    uc_mem_read(uc, source, buffer, (size_t)length) != UC_ERR_OK) {
+		fprintf(stderr, "[%s service] invalid transmit request\n",
+			bootchain_active_stage());
+		bootchain_fail(uc);
+		return;
+	}
+	if (length == 0)
+		return;
+	buffer[length] = '\0';
+	for (size_t i = 0; i < length; i++) {
+		unsigned char character = (unsigned char)buffer[i];
+
+		if (character != '\r' && character != '\n' && character != '\t' &&
+		    (character < 0x20 || character > 0x7e))
+			buffer[i] = '.';
+	}
+	printf("[%s service] ", bootchain_active_stage());
+	for (size_t i = 0; i < length; i++)
+		if (buffer[i] != '\r')
+			putchar(buffer[i]);
+	if (buffer[length - 1] != '\n' && buffer[length - 1] != '\r')
+		putchar('\n');
+}
+
+static void console_send_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			    void *user_data)
+{
+	uint64_t link;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (!bootrom_service_hook_active())
+		return;
+	print_firmware_console_data(uc);
+	if (bootchain_failed())
+		return;
+	if (uc_reg_read(uc, UC_ARM64_REG_LR, &link) != UC_ERR_OK ||
+	    uc_reg_write(uc, UC_ARM64_REG_PC, &link) != UC_ERR_OK) {
+		fprintf(stderr,
+			"[BootROM service] failed to return from transmit\n");
+		bootchain_fail(uc);
+	}
+}
+
+static void math_status_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			   void *user_data)
+{
+	uint64_t descriptors;
+	uint64_t channel;
+	uint32_t registers;
+	const uint32_t ready = 7;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (!bootrom_service_hook_active())
+		return;
+	if (uc_reg_read(uc, UC_ARM64_REG_X0, &descriptors) != UC_ERR_OK ||
+	    uc_reg_read(uc, UC_ARM64_REG_X1, &channel) != UC_ERR_OK ||
+	    uc_mem_read(uc, descriptors + channel * 0x20, &registers,
+			sizeof(registers)) != UC_ERR_OK ||
+	    uc_mem_write(uc, (uint64_t)registers + 0x10, &ready,
+			 sizeof(ready)) != UC_ERR_OK) {
+		fprintf(stderr, "[BootROM] failed to complete math status wait\n");
+		bootchain_fail(uc);
+	}
+}
+
