@@ -46,6 +46,7 @@ target_sources(fireplace_soc PRIVATE
 	bootrom/bootrom.c
 	bootrom/auth.c
 	bootrom/fuses.c
+	bootrom/services.c
 )
 
 target_include_directories(fireplace_soc PRIVATE
