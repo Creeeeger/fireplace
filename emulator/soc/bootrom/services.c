@@ -232,3 +232,111 @@ static void math_status_cb(uc_engine *uc, uint64_t address, uint32_t size,
 	}
 }
 
+static void panic_cb(uc_engine *uc, uint64_t address, uint32_t size,
+		     void *user_data)
+{
+	uint64_t code = 0;
+	uint64_t caller = 0;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (!bootrom_service_hook_active())
+		return;
+	uc_reg_read(uc, UC_ARM64_REG_X1, &code);
+	uc_reg_read(uc, UC_ARM64_REG_LR, &caller);
+	fprintf(stderr, "[BootROM] panic code=0x%" PRIx64
+		" caller=0x%" PRIx64 "\n", code, caller);
+}
+
+static void panic_halt_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			  void *user_data)
+{
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (!bootrom_service_hook_active())
+		return;
+	bootchain_fail(uc);
+}
+
+static void firmware_receive(uc_engine *uc)
+{
+	uint64_t destination;
+	uint64_t length;
+	uint64_t result = 1;
+	bool handled = false;
+
+	if (uc_reg_read(uc, UC_ARM64_REG_X0, &destination) != UC_ERR_OK ||
+	    uc_reg_read(uc, UC_ARM64_REG_X1, &length) != UC_ERR_OK) {
+		fprintf(stderr, "[%s] failed to read storage request\n",
+			bootchain_active_stage());
+		bootchain_fail(uc);
+		return;
+	}
+	if (bootchain_stage() == BOOTCHAIN_STAGE_FWBL1)
+		handled = fwbl1_receive_epbl(uc, destination, length);
+	else if (bootchain_stage() == BOOTCHAIN_STAGE_EPBL ||
+		 bootchain_stage() == BOOTCHAIN_STAGE_BL2)
+		handled = epbl_receive_image(uc, destination, length);
+	if (!handled || uc_reg_write(uc, UC_ARM64_REG_X0, &result) != UC_ERR_OK) {
+		if (!bootchain_failed())
+			fprintf(stderr, "[%s] unsupported storage request\n",
+				bootchain_active_stage());
+		bootchain_fail(uc);
+	}
+}
+
+static void firmware_service_cb(uc_engine *uc, uint64_t address, uint32_t size,
+				void *user_data)
+{
+	uint64_t result = 0;
+
+	(void)size;
+	(void)user_data;
+	switch (address) {
+	case BOOTROM_STUB_SECURE_AUTH:
+		bootrom_auth_report_mode(uc);
+		break;
+	case BOOTROM_STUB_SET_REGS:
+		break;
+	case BOOTROM_STUB_SEND:
+		print_firmware_console_data(uc);
+		break;
+	case BOOTROM_STUB_RECEIVE:
+		firmware_receive(uc);
+		break;
+	case BOOTROM_STUB_HASH:
+		fwbl1_hash_sha512(uc);
+		break;
+	case BOOTROM_STUB_HASH_MODE:
+	{
+		uint64_t link = 0;
+
+		uc_reg_read(uc, UC_ARM64_REG_LR, &link);
+		result = link == UINT64_C(0x02022234) ? 1 : 0;
+		if (uc_reg_write(uc, UC_ARM64_REG_X0, &result) != UC_ERR_OK)
+			bootchain_fail(uc);
+		break;
+	}
+	}
+}
+
+uc_err bootrom_services_install(uc_engine *uc)
+{
+	const struct bootchain_hook hooks[] = {
+		BOOTCHAIN_CODE_HOOK(receive_fwbl1_cb, BOOTROM_BL1_RECEIVE_ADDR),
+		BOOTCHAIN_CODE_HOOK(jump_fwbl1_cb, BOOTROM_BL1_JUMP_ADDR),
+		BOOTCHAIN_CODE_HOOK(auth_ready_cb, BOOTROM_AUTH_READY_ADDR),
+		BOOTCHAIN_CODE_HOOK(console_send_cb, BOOTROM_CONSOLE_SEND_ADDR),
+		BOOTCHAIN_CODE_HOOK(math_status_cb, BOOTROM_MATH_STATUS_ADDR),
+		BOOTCHAIN_CODE_HOOK(ecdsa_verify_cb, BOOTROM_ECDSA_VERIFY_ADDR),
+		BOOTCHAIN_CODE_HOOK(ecdsa_dispatch_cb, BOOTROM_ECDSA_DISPATCH_ADDR),
+		BOOTCHAIN_CODE_HOOK(panic_cb, BOOTROM_PANIC_ADDR),
+		BOOTCHAIN_CODE_HOOK(panic_halt_cb, BOOTROM_PANIC_HALT_ADDR),
+		BOOTCHAIN_HOOK_RANGE(UC_HOOK_CODE, firmware_service_cb,
+				     BOOTROM_STUB_BASE, BOOTROM_STUB_HASH_MODE),
+	};
+
+	return bootchain_install_hooks(uc, hooks, ARRAY_SIZE(hooks));
+}
