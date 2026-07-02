@@ -75,3 +75,41 @@ void fwbl1_hash_sha512(uc_engine *uc)
 	}
 }
 
+static void epbl_handoff_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			    void *user_data)
+{
+	const uint32_t crypto_success = UINT32_C(0x43435553);
+	uc_err err;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (bootchain_stage() != BOOTCHAIN_STAGE_FWBL1)
+		return;
+	err = bootchain_decrypt_epbl_image(uc);
+	if (err == UC_ERR_OK)
+		err = uc_mem_write(uc, EPBL_CRYPTO_STATUS_ADDR, &crypto_success,
+				   sizeof(crypto_success));
+	if (err != UC_ERR_OK) {
+		fprintf(stderr, "[FWBL1] failed to prepare EPBL: %s\n",
+			uc_strerror(err));
+		bootchain_fail(uc);
+		return;
+	}
+	if (!bootchain_transition(uc, BOOTCHAIN_STAGE_FWBL1,
+				  BOOTCHAIN_STAGE_EPBL))
+		return;
+	printf("[FWBL1] secure authentication bypassed; EPBL decrypted "
+	       "in-place\n");
+}
+
+uc_err fwbl1_init(uc_engine *uc)
+{
+	const struct bootchain_hook hooks[] = {
+		BOOTCHAIN_CODE_HOOK(epbl_handoff_cb, EPBL_ENTRY_ADDR),
+	};
+
+	receive_logged = false;
+	hash_logged = false;
+	return bootchain_install_hooks(uc, hooks, ARRAY_SIZE(hooks));
+}
