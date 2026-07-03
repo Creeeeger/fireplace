@@ -201,3 +201,26 @@ static void eret_cb(uc_engine *uc, uint64_t address, uint32_t size,
 	uc_emu_stop(uc);
 }
 
+static void auth_bypass_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			   void *user_data)
+{
+	uint64_t link;
+	uint64_t result = 0;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (!auth_bypass_logged) {
+		fprintf(stderr,
+			"[EPBL] stage signature verification forced success "
+			"temporarily\n");
+		auth_bypass_logged = true;
+	}
+	if (uc_reg_read(uc, UC_ARM64_REG_LR, &link) != UC_ERR_OK ||
+	    uc_reg_write(uc, UC_ARM64_REG_X0, &result) != UC_ERR_OK ||
+	    uc_reg_write(uc, UC_ARM64_REG_PC, &link) != UC_ERR_OK) {
+		fprintf(stderr, "[EPBL] failed to bypass stage authentication\n");
+		bootchain_fail(uc);
+	}
+}
+
