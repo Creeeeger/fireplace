@@ -120,3 +120,84 @@ bool epbl_receive_image(uc_engine *uc, uint64_t destination, uint64_t length)
 	return false;
 }
 
+static void wait_status_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			   void *user_data)
+{
+	uint64_t status_address;
+	uint32_t status;
+	int address_register;
+
+	(void)size;
+	(void)user_data;
+	if (address == UINT64_C(0x0202e2dc)) {
+		address_register = UC_ARM64_REG_X9;
+		status = 1;
+	} else if (address == UINT64_C(0x0202e308) ||
+		   address == UINT64_C(0x0202e328)) {
+		address_register = UC_ARM64_REG_X6;
+		status = 3;
+	} else {
+		address_register = UC_ARM64_REG_X6;
+		status = UINT32_C(0x45);
+	}
+	if (uc_reg_read(uc, address_register, &status_address) != UC_ERR_OK ||
+	    uc_mem_write(uc, status_address, &status, sizeof(status)) != UC_ERR_OK) {
+		fprintf(stderr, "[EPBL] failed to complete PLL status wait\n");
+		bootchain_fail(uc);
+	}
+}
+
+static void context_relocation_cb(uc_engine *uc, uint64_t address,
+				  uint32_t size, void *user_data)
+{
+	const uint32_t boot_bl2 = 1;
+
+	(void)size;
+	(void)user_data;
+	if (address == UINT64_C(0x020276d0)) {
+		if (uc_mem_read(uc, EPBL_RELOCATION_ADDR, runtime_window,
+				sizeof(runtime_window)) != UC_ERR_OK) {
+			fprintf(stderr, "[EPBL] failed to save runtime window\n");
+			bootchain_fail(uc);
+			return;
+		}
+		runtime_window_saved = true;
+		return;
+	}
+	if (!runtime_window_saved ||
+	    uc_mem_write(uc, EPBL_RELOCATION_ADDR, runtime_window,
+			 sizeof(runtime_window)) != UC_ERR_OK ||
+	    uc_mem_write(uc, EPBL_BOOT_FLAG_ADDR, &boot_bl2,
+			 sizeof(boot_bl2)) != UC_ERR_OK) {
+		fprintf(stderr, "[EPBL] failed to restore runtime window\n");
+		bootchain_fail(uc);
+	}
+}
+
+static void eret_cb(uc_engine *uc, uint64_t address, uint32_t size,
+		    void *user_data)
+{
+	const uint32_t msr_elr_el3 = UINT32_C(0xd51e4031);
+	uint64_t return_address;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (!bootchain_cpu_get_system_register(msr_elr_el3, &return_address) ||
+	    return_address < BL2_LOAD_ADDR ||
+	    return_address >= BL2_LOAD_ADDR + BL2_IMAGE_SIZE) {
+		fprintf(stderr, "[EPBL] invalid exception-return target\n");
+		bootchain_fail(uc);
+		return;
+	}
+	if (smc_in_progress &&
+	    uc_reg_write(uc, UC_ARM64_REG_SP, &lower_sp) != UC_ERR_OK) {
+		fprintf(stderr, "[EPBL] failed to restore BL2 stack\n");
+		bootchain_fail(uc);
+		return;
+	}
+	smc_in_progress = false;
+	bootchain_request_resume(return_address);
+	uc_emu_stop(uc);
+}
+
