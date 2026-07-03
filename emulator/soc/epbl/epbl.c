@@ -224,3 +224,37 @@ static void auth_bypass_cb(uc_engine *uc, uint64_t address, uint32_t size,
 	}
 }
 
+static void el3_decrypt_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			   void *user_data)
+{
+	uint64_t link;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (bootchain_stage() == BOOTCHAIN_STAGE_BL2 &&
+	    !ufs_loaded_later_images_adopted) {
+		if (!lk_loaded && lk_apply_runtime_patches(uc) != UC_ERR_OK) {
+			fprintf(stderr,
+				"[EPBL] failed to patch UFS-loaded LK image\n");
+			bootchain_fail(uc);
+			return;
+		}
+		lk_loaded = true;
+		el3_loaded = true;
+		ufs_loaded_later_images_adopted = true;
+		printf("[EPBL] adopted LK/EL3 loaded through UFS\n");
+	}
+	if (bootchain_stage() != BOOTCHAIN_STAGE_BL2 || !el3_loaded ||
+	    !lk_loaded || el3_decrypted ||
+	    bootchain_decrypt_el3_image(uc) != UC_ERR_OK ||
+	    uc_reg_read(uc, UC_ARM64_REG_LR, &link) != UC_ERR_OK ||
+	    uc_reg_write(uc, UC_ARM64_REG_PC, &link) != UC_ERR_OK) {
+		fprintf(stderr, "[EPBL] invalid EL3 decryption request\n");
+		bootchain_fail(uc);
+		return;
+	}
+	el3_decrypted = true;
+	printf("[EPBL] EL3 monitor decrypted in-place\n");
+}
+
