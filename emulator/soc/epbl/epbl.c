@@ -1,0 +1,122 @@
+
+#include <inttypes.h>
+#include <stdio.h>
+
+#include "bootchain/bootchain_internal.h"
+
+#define EPBL_BOOT_FLAG_ADDR UINT64_C(0x02031030)
+#define EPBL_RELOCATION_ADDR UINT64_C(0x02030000)
+#define EPBL_RELOCATION_SIZE 0x2fc0
+#define EPBL_VERIFY_STAGE_SIGNATURE_ADDR UINT64_C(0x02028a4c)
+#define EPBL_EL3_DECRYPT_ADDR UINT64_C(0x0202a324)
+
+static unsigned char runtime_window[EPBL_RELOCATION_SIZE];
+static bool runtime_window_saved;
+static uint64_t lower_sp;
+static bool smc_in_progress;
+static bool bl2_loaded;
+static bool lk_loaded;
+static bool el3_loaded;
+static bool el3_decrypted;
+static bool ufs_loaded_later_images_adopted;
+static bool smc_logged;
+static bool auth_bypass_logged;
+static uint64_t last_smc;
+
+bool epbl_route_smc(uc_engine *uc, uint64_t return_address)
+{
+	const uint32_t mrs_esr_el3 = UINT32_C(0xd53e521e);
+	const uint32_t mrs_elr_el3 = UINT32_C(0xd53e4021);
+	const uint64_t exception_stack = UINT64_C(0x02032240);
+	const uint64_t vector = UINT64_C(0x02030400);
+	uint64_t function_id;
+
+	if (bootchain_stage() != BOOTCHAIN_STAGE_BL2)
+		return false;
+	if (uc_reg_read(uc, UC_ARM64_REG_X0, &function_id) != UC_ERR_OK ||
+	    uc_reg_read(uc, UC_ARM64_REG_SP, &lower_sp) != UC_ERR_OK ||
+	    !bootchain_cpu_set_system_register(mrs_esr_el3,
+					       UINT64_C(0x17) << 26) ||
+	    !bootchain_cpu_set_system_register(mrs_elr_el3, return_address) ||
+	    uc_reg_write(uc, UC_ARM64_REG_SP, &exception_stack) != UC_ERR_OK ||
+	    uc_reg_write(uc, UC_ARM64_REG_PC, &vector) != UC_ERR_OK) {
+		fprintf(stderr, "[EPBL] failed to enter BL2 SMC vector\n");
+		bootchain_fail(uc);
+		return true;
+	}
+	if (!smc_logged || function_id != last_smc) {
+		printf("[SMC] BL2 -> EPBL fid=0x%" PRIx64 "\n", function_id);
+		smc_logged = true;
+		last_smc = function_id;
+	}
+	smc_in_progress = true;
+	return true;
+}
+
+static bool receive_bl2(uc_engine *uc, uint64_t destination, uint64_t length)
+{
+	uc_err err;
+
+	if (bl2_loaded || destination != BL2_LOAD_ADDR ||
+	    length != BL2_IMAGE_SIZE) {
+		fprintf(stderr, "[EPBL] unsupported BL2 read destination=0x%" PRIx64
+			" size=0x%" PRIx64 "\n", destination, length);
+		bootchain_fail(uc);
+		return false;
+	}
+	err = bootchain_load_image(uc, BL2_IMAGE, destination, length);
+	if (err != UC_ERR_OK) {
+		bootchain_fail(uc);
+		return false;
+	}
+	bl2_loaded = true;
+	printf("[EPBL] loaded BL2 at 0x%" PRIx64 "\n", destination);
+	return true;
+}
+
+static bool receive_later_image(uc_engine *uc, uint64_t destination,
+				uint64_t length)
+{
+	const char *filename;
+	const char *name;
+
+	if (destination == LK_LOAD_ADDR && length == LK_IMAGE_SIZE &&
+	    !lk_loaded) {
+		filename = LK_IMAGE;
+		name = "LK";
+	} else if (destination == EL3_LOAD_ADDR && length == EL3_IMAGE_SIZE &&
+		   !el3_loaded) {
+		filename = EL3_IMAGE;
+		name = "EL3 monitor";
+	} else {
+		fprintf(stderr, "[EPBL] unsupported image read destination=0x%"
+			PRIx64 " size=0x%" PRIx64 "\n", destination, length);
+		bootchain_fail(uc);
+		return false;
+	}
+	if (bootchain_load_image(uc, filename, destination, length) != UC_ERR_OK) {
+		bootchain_fail(uc);
+		return false;
+	}
+	if (destination == LK_LOAD_ADDR && lk_apply_runtime_patches(uc) !=
+					     UC_ERR_OK) {
+		bootchain_fail(uc);
+		return false;
+	}
+	if (destination == LK_LOAD_ADDR)
+		lk_loaded = true;
+	else
+		el3_loaded = true;
+	printf("[EPBL] loaded %s at 0x%" PRIx64 "\n", name, destination);
+	return true;
+}
+
+bool epbl_receive_image(uc_engine *uc, uint64_t destination, uint64_t length)
+{
+	if (bootchain_stage() == BOOTCHAIN_STAGE_EPBL)
+		return receive_bl2(uc, destination, length);
+	if (bootchain_stage() == BOOTCHAIN_STAGE_BL2)
+		return receive_later_image(uc, destination, length);
+	return false;
+}
+
