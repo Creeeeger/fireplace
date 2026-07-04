@@ -72,3 +72,61 @@ static void dca_training_cb(uc_engine *uc, uint64_t address, uint32_t size,
 	}
 }
 
+static void busy_delay_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			  void *user_data)
+{
+	uint64_t link;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (bootchain_stage() != BOOTCHAIN_STAGE_BL2)
+		return;
+	if (uc_reg_read(uc, UC_ARM64_REG_LR, &link) != UC_ERR_OK ||
+	    uc_reg_write(uc, UC_ARM64_REG_PC, &link) != UC_ERR_OK) {
+		fprintf(stderr, "[BL2] failed to skip busy delay\n");
+		bootchain_fail(uc);
+		return;
+	}
+	if (!busy_delay_logged) {
+		printf("[BL2] skipping firmware busy delay loop\n");
+		busy_delay_logged = true;
+	}
+}
+
+static void fatal_cb(uc_engine *uc, uint64_t address, uint32_t size,
+		     void *user_data)
+{
+	uint64_t code;
+	uint64_t caller;
+
+	(void)address;
+	(void)size;
+	(void)user_data;
+	if (uc_reg_read(uc, UC_ARM64_REG_X0, &code) != UC_ERR_OK ||
+	    uc_reg_read(uc, UC_ARM64_REG_LR, &caller) != UC_ERR_OK) {
+		fprintf(stderr, "[BL2] fatal error with unreadable context\n");
+	} else {
+		fprintf(stderr, "[BL2] fatal code=%" PRIu64 " caller=0x%" PRIx64
+			"\n", code, caller);
+	}
+	bootchain_fail(uc);
+}
+
+uc_err bl2_init(uc_engine *uc)
+{
+	const struct bootchain_hook hooks[] = {
+		BOOTCHAIN_CODE_HOOK(entry_cb, BL2_LOAD_ADDR),
+		BOOTCHAIN_CODE_HOOK(eye_validation_cb,
+				    BL2_EYE_VALIDATION_ADDR),
+		BOOTCHAIN_CODE_HOOK(dca_training_cb,
+				    BL2_DCA_TRAINING_FATAL_ADDR),
+		BOOTCHAIN_CODE_HOOK(busy_delay_cb, BL2_BUSY_DELAY_ADDR),
+		BOOTCHAIN_CODE_HOOK(fatal_cb, BL2_FATAL_ADDR),
+	};
+
+	eye_compatibility_logged = false;
+	dca_compatibility_logged = false;
+	busy_delay_logged = false;
+	return bootchain_install_hooks(uc, hooks, ARRAY_SIZE(hooks));
+}
