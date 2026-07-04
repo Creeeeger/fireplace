@@ -258,3 +258,53 @@ static void el3_decrypt_cb(uc_engine *uc, uint64_t address, uint32_t size,
 	printf("[EPBL] EL3 monitor decrypted in-place\n");
 }
 
+static void el3_handoff_cb(uc_engine *uc, uint64_t address, uint32_t size,
+			   void *user_data)
+{
+	(void)size;
+	(void)user_data;
+	if (!lk_loaded || !el3_loaded || !el3_decrypted ||
+	    !bootchain_transition(uc, BOOTCHAIN_STAGE_BL2,
+				  BOOTCHAIN_STAGE_EL3)) {
+		if (!bootchain_failed()) {
+			fprintf(stderr, "[BL2] invalid EL3 handoff state\n");
+			bootchain_fail(uc);
+		}
+		return;
+	}
+	printf("[BL2] EL3 monitor handoff reached at 0x%" PRIx64 "\n", address);
+}
+
+uc_err epbl_init(uc_engine *uc)
+{
+	const struct bootchain_hook hooks[] = {
+		BOOTCHAIN_CODE_HOOK(wait_status_cb, UINT64_C(0x0202e2dc)),
+		BOOTCHAIN_CODE_HOOK(wait_status_cb, UINT64_C(0x0202e308)),
+		BOOTCHAIN_CODE_HOOK(wait_status_cb, UINT64_C(0x0202e328)),
+		BOOTCHAIN_CODE_HOOK(wait_status_cb, UINT64_C(0x0202e38c)),
+		BOOTCHAIN_CODE_HOOK(wait_status_cb, UINT64_C(0x0202e3a8)),
+		BOOTCHAIN_CODE_HOOK(wait_status_cb, UINT64_C(0x0202e3c4)),
+		BOOTCHAIN_CODE_HOOK(context_relocation_cb,
+				    UINT64_C(0x020276d0)),
+		BOOTCHAIN_CODE_HOOK(context_relocation_cb,
+				    UINT64_C(0x020260e8)),
+		BOOTCHAIN_CODE_HOOK(eret_cb, UINT64_C(0x0202e090)),
+		BOOTCHAIN_CODE_HOOK(eret_cb, UINT64_C(0x02027484)),
+		BOOTCHAIN_CODE_HOOK(auth_bypass_cb,
+				    EPBL_VERIFY_STAGE_SIGNATURE_ADDR),
+		BOOTCHAIN_CODE_HOOK(el3_decrypt_cb, EPBL_EL3_DECRYPT_ADDR),
+		BOOTCHAIN_CODE_HOOK(el3_handoff_cb, EL3_ENTRY_ADDR),
+	};
+
+	runtime_window_saved = false;
+	smc_in_progress = false;
+	bl2_loaded = false;
+	lk_loaded = false;
+	el3_loaded = false;
+	el3_decrypted = false;
+	ufs_loaded_later_images_adopted = false;
+	smc_logged = false;
+	auth_bypass_logged = false;
+	last_smc = 0;
+	return bootchain_install_hooks(uc, hooks, ARRAY_SIZE(hooks));
+}
