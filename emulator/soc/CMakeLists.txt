@@ -35,6 +35,7 @@ add_library(fireplace_soc STATIC
 
 target_sources(fireplace_soc PRIVATE
 	bl1/bl1.c
+	bl2/bl2.c
 	bootchain/bootchain.c
 	bootchain/crypto.c
 	bootchain/cpu.c
