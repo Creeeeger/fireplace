@@ -51,6 +51,7 @@ target_sources(fireplace_soc PRIVATE
 	bootrom/services.c
 	el3_mon/el3_mon.c
 	el3_mon/context.c
+	el3_mon/lk_handoff.c
 	el3_mon/worlds.c
 	epbl/epbl.c
 )
