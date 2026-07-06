@@ -50,6 +50,7 @@ target_sources(fireplace_soc PRIVATE
 	bootrom/fuses.c
 	bootrom/services.c
 	el3_mon/el3_mon.c
+	el3_mon/context.c
 	epbl/epbl.c
 )
 
