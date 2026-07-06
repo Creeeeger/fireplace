@@ -49,6 +49,7 @@ target_sources(fireplace_soc PRIVATE
 	bootrom/auth.c
 	bootrom/fuses.c
 	bootrom/services.c
+	el3_mon/el3_mon.c
 	epbl/epbl.c
 )
 
