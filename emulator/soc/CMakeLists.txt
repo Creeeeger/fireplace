@@ -52,6 +52,7 @@ target_sources(fireplace_soc PRIVATE
 	el3_mon/el3_mon.c
 	el3_mon/context.c
 	el3_mon/lk_handoff.c
+	el3_mon/returns.c
 	el3_mon/route_lk.c
 	el3_mon/worlds.c
 	epbl/epbl.c
