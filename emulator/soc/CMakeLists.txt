@@ -54,6 +54,7 @@ target_sources(fireplace_soc PRIVATE
 	el3_mon/lk_handoff.c
 	el3_mon/returns.c
 	el3_mon/route_lk.c
+	el3_mon/route_secure.c
 	el3_mon/worlds.c
 	epbl/epbl.c
 )
