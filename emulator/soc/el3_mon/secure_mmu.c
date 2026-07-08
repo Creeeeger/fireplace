@@ -236,3 +236,112 @@ bool page_in_secure_os_low_va(uc_engine *uc, uint64_t address,
     return true;
 }
 
+bool populate_secure_os_low_image(uc_engine *uc, bool *populated)
+{
+    bool any_populated = false;
+
+    for (uint64_t va = 0; va < SECURE_OS_LOW_IMAGE_END;
+         va += SECURE_OS_VA_PAGE_SIZE) {
+        uint64_t pa = 0;
+        bool page_populated = false;
+
+        /* Holes are normal; only materialize valid TTBR0 mappings. */
+        if (!translate_secure_os_low_va(uc, va, &pa))
+            continue;
+
+        if (!page_in_secure_os_low_va(uc, va, &page_populated))
+            return false;
+        any_populated |= page_populated;
+    }
+
+    if (populated)
+        *populated = any_populated;
+    return true;
+}
+
+bool page_in_secure_os_va(uc_engine *uc, uint64_t address)
+{
+    uint8_t page[SECURE_OS_VA_PAGE_SIZE];
+    uint64_t va;
+    uint64_t pa;
+    uint64_t pa_page;
+    uint64_t registered_pa = 0;
+    bool already_registered;
+    uc_err err;
+
+    va = address & ~(SECURE_OS_VA_PAGE_SIZE - 1);
+
+    if (!translate_secure_os_va_coherent(uc, va, &pa)) {
+        uint64_t ttbr1 = 0;
+        uint64_t tcr = 0;
+        uint64_t sctlr = 0;
+
+        bootchain_cpu_get_system_register(MRS_TTBR1_EL1, &ttbr1);
+        bootchain_cpu_get_system_register(MRS_TCR_EL1, &tcr);
+        bootchain_cpu_get_system_register(MRS_SCTLR_EL1, &sctlr);
+
+        fprintf(stderr,
+                "[EL3] failed to translate SecureOS VA "
+                "0x%016" PRIx64
+                " after shadow synchronization"
+                " TTBR1=0x%016" PRIx64
+                " TCR=0x%016" PRIx64
+                " SCTLR=0x%016" PRIx64 "\n",
+                address, ttbr1, tcr, sctlr);
+        return false;
+    }
+
+    pa_page = pa & ~(SECURE_OS_VA_PAGE_SIZE - 1);
+
+    err = uc_mem_read(uc, pa_page, page, sizeof(page));
+    if (err != UC_ERR_OK) {
+        fprintf(stderr,
+                "[EL3] failed to read SecureOS physical page "
+                "VA=0x%016" PRIx64
+                " PA=0x%016" PRIx64 ": %s\n",
+                va, pa_page, uc_strerror(err));
+        return false;
+    }
+    
+    already_registered = find_secure_os_shadow_page(va, &registered_pa);
+    if (already_registered && registered_pa == pa_page)
+        return true;
+
+    if (!already_registered) {
+        err = uc_mem_map(uc, va, SECURE_OS_VA_PAGE_SIZE, UC_PROT_ALL);
+        if (err != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[EL3] failed to map SecureOS VA page "
+                    "0x%016" PRIx64 ": %s\n",
+                    va, uc_strerror(err));
+            return false;
+        }
+    }
+
+    err = uc_mem_write(uc, va, page, sizeof(page));
+    if (err != UC_ERR_OK) {
+        fprintf(stderr,
+                "[EL3] failed to populate SecureOS VA page "
+                "0x%016" PRIx64 ": %s\n",
+                va, uc_strerror(err));
+        return false;
+    }
+
+    if (!remember_secure_os_shadow_page(va, pa_page)) {
+        fprintf(stderr,
+                "[EL3] SecureOS shadow-page table full\n");
+        return false;
+    }
+
+    /*
+     * Do not call uc_ctl_flush_tb() here.
+     *
+     * This function runs from an invalid-memory hook. The failed
+     * translation has no valid translated block to invalidate, and
+     * flushing Unicorn's TB from inside this callback can crash the
+     * host process.
+     */
+    return true;
+}
+
+
