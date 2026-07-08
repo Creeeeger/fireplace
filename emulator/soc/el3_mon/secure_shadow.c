@@ -110,3 +110,107 @@ bool publish_secure_os_pending_writes(uc_engine *uc)
     return true;
 }
 
+bool sync_secure_os_va_shadow(uc_engine *uc)
+{
+    struct secure_os_shadow_owner {
+        uint64_t pa;
+        size_t index;
+        bool occupied;
+    };
+    struct secure_os_shadow_owner *owners;
+    uint8_t page[SECURE_OS_VA_PAGE_SIZE];
+    size_t owner_capacity = 1;
+
+    if (secure_os_pending_write_count != 0 &&
+        !publish_secure_os_pending_writes(uc))
+        return false;
+
+    while (owner_capacity < secure_os_shadow_page_count * 2)
+        owner_capacity <<= 1;
+    owners = calloc(owner_capacity, sizeof(*owners));
+    if (!owners)
+        return false;
+
+    /* Select the newest writer for every physical page in linear time. */
+    for (size_t i = 0; i < secure_os_shadow_page_count; i++) {
+        const struct secure_os_shadow_page *entry =
+            &secure_os_shadow_pages[i];
+        size_t slot;
+
+        if (entry->write_sequence == 0)
+            continue;
+        slot = (size_t)(((entry->pa >> 12) *
+                         UINT64_C(0x9e3779b97f4a7c15)) &
+                        (owner_capacity - 1));
+        while (owners[slot].occupied && owners[slot].pa != entry->pa)
+            slot = (slot + 1) & (owner_capacity - 1);
+        if (!owners[slot].occupied ||
+            secure_os_shadow_pages[owners[slot].index].write_sequence <
+                entry->write_sequence) {
+            owners[slot].occupied = true;
+            owners[slot].pa = entry->pa;
+            owners[slot].index = i;
+        }
+    }
+
+    for (size_t slot = 0; slot < owner_capacity; slot++) {
+        const struct secure_os_shadow_page *owner;
+
+        if (!owners[slot].occupied)
+            continue;
+        owner = &secure_os_shadow_pages[owners[slot].index];
+        if (uc_mem_read(uc, owner->va, page, sizeof(page)) != UC_ERR_OK ||
+            uc_mem_write(uc, owner->pa, page, sizeof(page)) != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[EL3] failed to synchronize SecureOS page "
+                    "VA=0x%016" PRIx64 " PA=0x%016" PRIx64 "\n",
+                    owner->va, owner->pa);
+            free(owners);
+            return false;
+        }
+    }
+
+    free(owners);
+    return refresh_secure_os_va_shadow(uc);
+}
+
+bool refresh_secure_os_va_shadow(uc_engine *uc)
+{
+    uint8_t page[SECURE_OS_VA_PAGE_SIZE];
+
+    for (size_t i = 0; i < secure_os_shadow_page_count; i++) {
+        struct secure_os_shadow_page *entry =
+            &secure_os_shadow_pages[i];
+        uint64_t current_pa = 0;
+
+        if (entry->va >= UINT64_C(0xffff000000000000)) {
+            if (translate_secure_os_va(uc, entry->va, &current_pa))
+                current_pa &= ~(SECURE_OS_VA_PAGE_SIZE - 1);
+        } else if (translate_secure_os_low_va(
+                       uc, entry->va, &current_pa)) {
+            current_pa &= ~(SECURE_OS_VA_PAGE_SIZE - 1);
+        }
+
+        if (current_pa != 0 && current_pa != entry->pa) {
+            entry->pa = current_pa;
+        }
+
+        if (uc_mem_read(uc, entry->pa, page,
+                        sizeof(page)) != UC_ERR_OK ||
+            uc_mem_write(uc, entry->va, page,
+                         sizeof(page)) != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[EL3] failed to refresh SecureOS shadow page "
+                    "VA=0x%016" PRIx64
+                    " PA=0x%016" PRIx64 "\n",
+                    entry->va, entry->pa);
+            return false;
+        }
+
+        entry->write_sequence = 0;
+    }
+
+    return true;
+}
+
+
