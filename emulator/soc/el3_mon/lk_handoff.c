@@ -28,6 +28,69 @@ void lk_handoff_cb(uc_engine *uc,
     }
 
     /*
+     * Initial SecureOS entry selected by firmware.
+     *
+     * This handles both the authentication/load SMC and a later
+     * START_USERSPACE request.
+     */
+    if (servicing_lk && is_secure_os_return_target(return_address)) {
+        uint64_t secure_payload_sp = 0;
+
+        if (active_smc == EL3_SMC_SECURE_OS) {
+            secure_os_shadow_page_count = 0;
+            secure_os_shadow_write_sequence = 0;
+            saved_secure_os_sp_el0 = 0;
+            saved_secure_os_sp_el0_valid = false;
+            memset(secure_os_shadow_pages, 0,
+                   sizeof(secure_os_shadow_pages));
+        }
+
+        if (active_smc != EL3_SMC_SECURE_OS) {
+            uc_err sp_err = uc_reg_read(uc, UC_ARM64_REG_SP_EL1,
+                                        &secure_payload_sp);
+
+            if (sp_err != UC_ERR_OK || secure_payload_sp == 0)
+                secure_payload_sp = restored_secure_os_sp_el1;
+            if (secure_payload_sp == 0)
+                secure_payload_sp = saved_secure_os_sp;
+
+            if (secure_payload_sp == 0 ||
+                uc_reg_write(uc, UC_ARM64_REG_SP,
+                             &secure_payload_sp) != UC_ERR_OK ||
+                !restore_secure_os_sp_el0(uc)) {
+                fprintf(stderr,
+                        "[EL3] failed to restore SecureOS SP_EL1 for "
+                        "LK SMC 0x%" PRIx64 "\n",
+                        active_smc);
+                bootchain_fail(uc);
+                return;
+            }
+            /*
+             * SecureOS recycles high virtual addresses between handler
+             * loads.  Reconcile each shadow with the PTE selected by the
+             * context EL3 just restored before SecureOS can read it.
+             */
+            if (!refresh_secure_os_va_shadow(uc)) {
+                bootchain_fail(uc);
+                return;
+            }
+        }
+
+        secure_os_active = true;
+        secure_os_monitor_sp = stack_pointer;
+        secure_os_runtime_sp = 0;
+        secure_os_runtime_smc_pending = false;
+        secure_os_runtime_returns_to_lk = false;
+        secure_os_runtime_lk_x0 = 0;
+
+        if (active_smc == EL3_SMC_SECURE_OS)
+            saved_secure_os_sp = 0;
+
+        bootchain_request_resume(return_address);
+        uc_emu_stop(uc);
+        return;
+    }
+    /*
      * Any remaining return must be to LK.
      */
     if (!is_lk_return_target(return_address)) {
