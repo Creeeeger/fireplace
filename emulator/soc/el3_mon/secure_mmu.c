@@ -123,3 +123,116 @@ bool el3_mon_read_secure_os_instruction(uc_engine *uc, uint64_t address,
     return true;
 }
 
+bool remember_secure_os_shadow_page(uint64_t va, uint64_t pa)
+{
+    for (size_t i = 0; i < secure_os_shadow_page_count; i++) {
+        if (secure_os_shadow_pages[i].va == va) {
+            secure_os_shadow_pages[i].pa = pa;
+            secure_os_shadow_pages[i].write_sequence = 0;
+            return true;
+        }
+    }
+
+    if (secure_os_shadow_page_count ==
+        SECURE_OS_SHADOW_PAGE_CAPACITY)
+        return false;
+
+    secure_os_shadow_pages[secure_os_shadow_page_count++] =
+        (struct secure_os_shadow_page) {
+            .va = va,
+            .pa = pa,
+            .write_sequence = 0,
+        };
+
+    return true;
+}
+
+bool translate_secure_os_va_coherent(uc_engine *uc,
+                                             uint64_t va,
+                                             uint64_t *pa)
+{
+    /*
+     * Fast path: the physical page tables are already current.
+     */
+    if (translate_secure_os_va(uc, va, pa))
+        return true;
+
+    /*
+     * SecureOS may have edited its page tables through one of the
+     * high-VA shadow aliases. Copy those writes back to the physical
+     * pages before walking the tables again.
+
+    fprintf(stderr,
+            "[EL3] SecureOS translation miss for VA=0x%016" PRIx64
+            "; synchronizing VA shadows and retrying\n",
+            va);
+     */
+    if (!sync_secure_os_va_shadow(uc))
+        return false;
+
+    return translate_secure_os_va(uc, va, pa);
+}
+
+bool page_in_secure_os_low_va(uc_engine *uc, uint64_t address,
+                                     bool *populated)
+{
+    uint8_t page[SECURE_OS_VA_PAGE_SIZE];
+    uint64_t va = address & ~(SECURE_OS_VA_PAGE_SIZE - 1);
+    uint64_t pa = 0;
+    uint64_t pa_page;
+    uint64_t registered_pa = 0;
+    uc_err err;
+
+    if (populated)
+        *populated = false;
+
+    if (!translate_secure_os_low_va(uc, va, &pa))
+        return false;
+
+    pa_page = pa & ~(SECURE_OS_VA_PAGE_SIZE - 1);
+    /*
+     * A handler context switch can reuse the same low VA with another
+     * TTBR0 physical page.  The write hooks keep aliases of the same
+     * physical page coherent, so a matching VA-to-PA registration is a
+     * sufficient fast path and avoids comparing two 4 KiB pages for every
+     * executed handler instruction.
+     */
+    if (find_secure_os_shadow_page(va, &registered_pa) &&
+        registered_pa == pa_page)
+        return true;
+
+    if (uc_mem_read(uc, pa_page, page, sizeof(page)) != UC_ERR_OK) {
+        fprintf(stderr,
+                "[EL3] failed to read SecureOS TTBR0 page "
+                "VA=0x%016" PRIx64 " PA=0x%016" PRIx64 "\n",
+                va, pa_page);
+        return false;
+    }
+
+    /* Existing identity-mapped boot regions can already own this VA. */
+    err = uc_mem_map(uc, va, SECURE_OS_VA_PAGE_SIZE, UC_PROT_ALL);
+    if (err != UC_ERR_OK && err != UC_ERR_MAP) {
+        fprintf(stderr,
+                "[EL3] failed to map SecureOS TTBR0 page "
+                "VA=0x%016" PRIx64 ": %s\n",
+                va, uc_strerror(err));
+        return false;
+    }
+
+    secure_os_alias_sync_active = true;
+    err = uc_mem_write(uc, va, page, sizeof(page));
+    secure_os_alias_sync_active = false;
+    if (err != UC_ERR_OK ||
+        !remember_secure_os_shadow_page(va, pa_page)) {
+        fprintf(stderr,
+                "[EL3] failed to populate SecureOS TTBR0 page "
+                "VA=0x%016" PRIx64 " PA=0x%016" PRIx64 "\n",
+                va, pa_page);
+        return false;
+    }
+
+    if (populated)
+        *populated = true;
+    return true;
+}
+
