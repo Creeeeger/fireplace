@@ -28,6 +28,64 @@ void lk_handoff_cb(uc_engine *uc,
     }
 
     /*
+     * Existing LDFW low-VA context return.
+     */
+    if (servicing_lk &&
+        return_address != 0 &&
+        return_address < EL3_LDFW_LOW_VA_LIMIT &&
+        stack_pointer >= EL3_LDFW_CONTEXT_SP_OFFSET) {
+        uint64_t context_base =
+            stack_pointer - EL3_LDFW_CONTEXT_SP_OFFSET;
+        uint64_t config = 0;
+        uint64_t image_size = 0;
+        uint64_t mapped_size;
+
+        if (find_ldfw_context(context_base, &mapped_size)) {
+            /* Context was registered during LDFW initialization. */
+        } else if (active_smc != EL3_SMC_LDFW ||
+                   !ldfw_runtime_setup_active ||
+                   uc_reg_read(uc, UC_ARM64_REG_X0,
+                               &config) != UC_ERR_OK ||
+                   config == 0 ||
+                   !read_u64(uc,
+                             config + UINT64_C(0x40),
+                             &image_size) ||
+                   image_size >
+                       EL3_LDFW_SHADOW_MAX_SIZE -
+                           EL3_LDFW_RUNTIME_PADDING) {
+            fprintf(stderr,
+                    "[EL3] failed to find LDFW VA context\n");
+            bootchain_fail(uc);
+            return;
+        } else {
+            mapped_size =
+                image_size + EL3_LDFW_RUNTIME_PADDING;
+        }
+
+        if (return_address >= mapped_size ||
+            ((!ldfw_shadow_active ||
+              ldfw_shadow_context != context_base) &&
+             !prepare_ldfw_va_shadow(uc,
+                                     context_base,
+                                     mapped_size)) ||
+            !ldfw_shadow_contains(return_address)) {
+            fprintf(stderr,
+                    "[EL3] failed to prepare LDFW VA context "
+                    "0x%08" PRIx64
+                    " size=0x%" PRIx64 "\n",
+                    context_base,
+                    mapped_size);
+            bootchain_fail(uc);
+            return;
+        }
+
+        ldfw_context_base = context_base;
+        bootchain_request_resume(return_address);
+        uc_emu_stop(uc);
+        return;
+    }
+
+    /*
      * Initial SecureOS entry selected by firmware.
      *
      * This handles both the authentication/load SMC and a later
