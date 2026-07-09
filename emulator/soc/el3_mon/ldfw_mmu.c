@@ -232,3 +232,112 @@ bool sync_ldfw_va_shadow(uc_engine *uc)
     return true;
 }
 
+bool deactivate_ldfw_va_shadow(uc_engine *uc)
+{
+    uc_err err;
+
+    if (!ldfw_shadow_active)
+        return true;
+
+    if (!sync_ldfw_va_shadow(uc))
+        return false;
+
+    for (uint64_t va = 0; va < ldfw_normal_memory_size;
+         va += EL3_LDFW_PAGE_SIZE) {
+        if (!ldfw_normal_memory_saved[va / EL3_LDFW_PAGE_SIZE])
+            continue;
+
+        if (ldfw_normal_memory_mapped[va / EL3_LDFW_PAGE_SIZE]) {
+            err = uc_mem_write(uc, va, ldfw_normal_memory + va,
+                               EL3_LDFW_PAGE_SIZE);
+        } else {
+            err = uc_mem_unmap(uc, va, EL3_LDFW_PAGE_SIZE);
+        }
+        if (err != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[EL3] failed to restore normal memory below "
+                    "LDFW VA=0x%08" PRIx64 ": %s\n",
+                    va, uc_strerror(err));
+            return false;
+        }
+    }
+
+    if (uc_ctl_flush_tb(uc) != UC_ERR_OK) {
+        fprintf(stderr,
+                "[EL3] failed to flush restored normal-memory cache\n");
+        return false;
+    }
+
+    ldfw_shadow_active = false;
+    ldfw_shadow_context = 0;
+    ldfw_shadow_size = 0;
+    memset(ldfw_shadow_mapped, 0, sizeof(ldfw_shadow_mapped));
+    memset(ldfw_normal_memory_saved, 0,
+           sizeof(ldfw_normal_memory_saved));
+    memset(ldfw_normal_memory_mapped, 0,
+           sizeof(ldfw_normal_memory_mapped));
+    free(ldfw_normal_memory);
+    ldfw_normal_memory = NULL;
+    ldfw_normal_memory_size = 0;
+    return true;
+}
+
+void reset_ldfw_va_shadow(void)
+{
+    ldfw_shadow_active = false;
+    ldfw_shadow_context = 0;
+    ldfw_shadow_size = 0;
+    memset(ldfw_shadow_mapped, 0, sizeof(ldfw_shadow_mapped));
+    memset(ldfw_normal_memory_saved, 0,
+           sizeof(ldfw_normal_memory_saved));
+    memset(ldfw_normal_memory_mapped, 0,
+           sizeof(ldfw_normal_memory_mapped));
+    free(ldfw_normal_memory);
+    ldfw_normal_memory = NULL;
+    ldfw_normal_memory_size = 0;
+}
+
+bool ldfw_shadow_contains(uint64_t va)
+{
+    return ldfw_shadow_active && va < ldfw_shadow_size &&
+           ldfw_shadow_mapped[va / EL3_LDFW_PAGE_SIZE] != 0;
+}
+
+bool remember_ldfw_context(uint64_t base, uint64_t size)
+{
+    for (size_t i = 0; i < ldfw_context_count; i++) {
+        if (ldfw_contexts[i].base == base) {
+            ldfw_contexts[i].size = size;
+            if (ldfw_saved_monitor_frame.valid &&
+                ldfw_saved_monitor_frame.context_base == base) {
+                ldfw_contexts[i].monitor_frame =
+                    ldfw_saved_monitor_frame;
+            }
+            return true;
+        }
+    }
+
+    if (ldfw_context_count == ARRAY_SIZE(ldfw_contexts))
+        return false;
+
+    ldfw_contexts[ldfw_context_count++] = (struct ldfw_context) {
+        .base = base,
+        .size = size,
+        .monitor_frame = ldfw_saved_monitor_frame,
+    };
+    return true;
+}
+
+bool find_ldfw_context(uint64_t base, uint64_t *size)
+{
+    for (size_t i = 0; i < ldfw_context_count; i++) {
+        if (ldfw_contexts[i].base == base) {
+            *size = ldfw_contexts[i].size;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
