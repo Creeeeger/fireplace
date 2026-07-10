@@ -149,6 +149,63 @@ bool el3_mon_route_runtime_smc(uc_engine *uc,
         uc_emu_stop(uc);
         return true;
     }
+
+    /*
+     * H-Arx runs at EL2 while the original LK 0x82000480 call remains
+     * suspended in EL3.  Its initialization finishes with a nested SMC
+     * (0x82000481), so feed that exception back through the real monitor
+     * instead of treating the EL2 SMC as an unsupported LK call.
+     */
+    if (bootchain_stage() == BOOTCHAIN_STAGE_EL3 &&
+        (servicing_lk || harx_hvc_pending) && harx_active &&
+        is_harx_return_target(return_address_value) &&
+        harx_monitor_sp != 0) {
+        if (uc_reg_read(uc, UC_ARM64_REG_X0, &function_id) != UC_ERR_OK ||
+            uc_reg_read(uc, UC_ARM64_REG_X1, &x1) != UC_ERR_OK ||
+            uc_reg_read(uc, UC_ARM64_REG_X2, &x2) != UC_ERR_OK ||
+            uc_reg_read(uc, UC_ARM64_REG_X3, &x3) != UC_ERR_OK ||
+            uc_reg_read(uc, UC_ARM64_REG_X4, &x4) != UC_ERR_OK ||
+            uc_reg_read(uc, UC_ARM64_REG_PSTATE, &pstate) != UC_ERR_OK ||
+            uc_reg_read(uc, UC_ARM64_REG_SP, &runtime_sp) != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[EL3] failed to capture H-Arx EL2 runtime SMC\n");
+            bootchain_fail(uc);
+            return true;
+        }
+
+        /* The H-Arx context is non-secure AArch64 (SCR.NS | SCR.RW). */
+        if (!bootchain_cpu_get_system_register(mrs_scr_el3, &scr))
+            scr = UINT64_C(0x431);
+        scr |= UINT64_C(0x401);
+
+        harx_runtime_sp = runtime_sp;
+        harx_runtime_smc_pending = true;
+        harx_active = false;
+
+        if (!bootchain_cpu_set_system_register(
+                mrs_esr_el3, UINT64_C(0x17) << 26) ||
+            !bootchain_cpu_set_system_register(
+                mrs_elr_el3, return_address_value) ||
+            !bootchain_cpu_set_system_register(mrs_spsr_el3, pstate) ||
+            !bootchain_cpu_set_system_register(mrs_scr_el3, scr) ||
+            uc_reg_write(uc, UC_ARM64_REG_PSTATE,
+                         &el3_pstate) != UC_ERR_OK ||
+            uc_reg_write(uc, UC_ARM64_REG_SP,
+                         &harx_monitor_sp) != UC_ERR_OK ||
+            uc_reg_write(uc, UC_ARM64_REG_PC, &vector) != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[EL3] failed to route H-Arx EL2 runtime SMC\n");
+            harx_runtime_sp = 0;
+            harx_runtime_smc_pending = false;
+            bootchain_fail(uc);
+            return true;
+        }
+
+        bootchain_request_resume(vector);
+        uc_emu_stop(uc);
+        return true;
+    }
+
     /*
      * Existing LDFW runtime-SMC path.
      */
