@@ -51,6 +51,7 @@ target_sources(fireplace_soc PRIVATE
 	bootrom/services.c
 	el3_mon/el3_mon.c
 	el3_mon/context.c
+	el3_mon/invalid_memory.c
 	el3_mon/ldfw_mmu.c
 	el3_mon/ldfw_service.c
 	el3_mon/lk_handoff.c
