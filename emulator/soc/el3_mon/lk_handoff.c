@@ -69,6 +69,30 @@ void lk_handoff_cb(uc_engine *uc,
         uc_emu_stop(uc);
         return;
     }
+
+    /* Return from a nested H-Arx EL2 SMC back to its saved continuation. */
+    if (harx_runtime_smc_pending &&
+        is_harx_return_target(return_address)) {
+        uint64_t runtime_sp = harx_runtime_sp;
+
+        harx_monitor_sp = stack_pointer;
+        if (runtime_sp == 0 ||
+            uc_reg_write(uc, UC_ARM64_REG_SP,
+                         &runtime_sp) != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[EL3] failed to restore H-Arx EL2 runtime stack\n");
+            bootchain_fail(uc);
+            return;
+        }
+
+        harx_runtime_sp = 0;
+        harx_runtime_smc_pending = false;
+        harx_active = true;
+        bootchain_request_resume(return_address);
+        uc_emu_stop(uc);
+        return;
+    }
+
     /*
      * Existing LDFW low-VA context return.
      */
@@ -190,6 +214,38 @@ void lk_handoff_cb(uc_engine *uc,
         uc_emu_stop(uc);
         return;
     }
+
+    /*
+     * The successful 0x82000480 service installs an EL2 context whose
+     * initial ELR is the H-Arx image base and whose SPSR is EL2h (0x3c9).
+     * The handoff hook replaces ERET, so explicitly select the banked EL2
+     * stack before resuming the image.
+     */
+    if (servicing_lk && active_smc == EL3_SMC_HARX_INIT &&
+        is_harx_return_target(return_address) &&
+        (return_spsr & UINT64_C(0xf)) == UINT64_C(0x9)) {
+        uint64_t sp_el2 = 0;
+        uint64_t entry_sp = stack_pointer;
+
+        harx_monitor_sp = stack_pointer;
+        (void)uc_reg_read(uc, UC_ARM64_REG_SP_EL2, &sp_el2);
+        if (sp_el2 != 0)
+            entry_sp = sp_el2;
+        if (uc_reg_write(uc, UC_ARM64_REG_SP, &entry_sp) != UC_ERR_OK) {
+            fprintf(stderr,
+                    "[EL3] failed to install H-Arx EL2 entry stack\n");
+            bootchain_fail(uc);
+            return;
+        }
+
+        harx_active = true;
+        harx_runtime_smc_pending = false;
+        harx_runtime_sp = 0;
+        bootchain_request_resume(return_address);
+        uc_emu_stop(uc);
+        return;
+    }
+
     /*
      * Any remaining return must be to LK.
      */
