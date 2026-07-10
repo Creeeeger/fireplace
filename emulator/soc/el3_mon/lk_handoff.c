@@ -28,6 +28,48 @@ void lk_handoff_cb(uc_engine *uc,
     }
 
     /*
+     * Return from an EL3-handled SecureOS runtime SMC.
+     *
+     * This must be tested before the initial SecureOS-entry branch,
+     * because active_smc still identifies the original LK SMC.
+     */
+    if (secure_os_runtime_smc_pending &&
+        is_secure_os_return_target(return_address)) {
+        uint64_t runtime_sp = secure_os_runtime_sp;
+
+        /*
+         * Preserve the EL3 monitor stack as restored by the firmware.
+         * The next SecureOS SMC will use this stack to enter EL3.
+         */
+        secure_os_monitor_sp = stack_pointer;
+
+        if (runtime_sp == 0 ||
+            uc_reg_write(uc, UC_ARM64_REG_SP,
+                         &runtime_sp) != UC_ERR_OK ||
+            !restore_secure_os_sp_el0(uc)) {
+            fprintf(stderr,
+                    "[EL3] failed to restore SecureOS runtime stack\n");
+            bootchain_fail(uc);
+            return;
+        }
+
+        if (!refresh_secure_os_va_shadow(uc)) {
+            bootchain_fail(uc);
+            return;
+        }
+
+
+        secure_os_runtime_sp = 0;
+        secure_os_runtime_smc_pending = false;
+        secure_os_runtime_returns_to_lk = false;
+        secure_os_runtime_lk_x0 = 0;
+        secure_os_active = true;
+
+        bootchain_request_resume(return_address);
+        uc_emu_stop(uc);
+        return;
+    }
+    /*
      * Existing LDFW low-VA context return.
      */
     if (servicing_lk &&
