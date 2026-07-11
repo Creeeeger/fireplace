@@ -20,8 +20,11 @@
 #include <unicorn/unicorn.h>
 
 #define UART_BUF_SIZE 80000
+#define UART_BASE 0x10540000ULL
+#define UART_TX_OFFSET 0x20
 
 int uart_init(struct uc_struct*);
 void uart_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64_t value, void *user_data);
+void uart_append_text(const char *text);
 
 #endif
