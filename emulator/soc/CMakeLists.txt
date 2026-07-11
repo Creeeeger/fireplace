@@ -65,6 +65,7 @@ target_sources(fireplace_soc PRIVATE
 	el3_mon/worlds.c
 	epbl/epbl.c
 	lk/lk.c
+	lk/lk_boot.c
 )
 
 target_include_directories(fireplace_soc PRIVATE
