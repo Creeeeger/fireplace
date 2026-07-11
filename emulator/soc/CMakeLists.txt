@@ -66,6 +66,7 @@ target_sources(fireplace_soc PRIVATE
 	epbl/epbl.c
 	lk/lk.c
 	lk/lk_boot.c
+	lk/lk_patches.c
 )
 
 target_include_directories(fireplace_soc PRIVATE
