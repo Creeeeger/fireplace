@@ -68,6 +68,7 @@ target_sources(fireplace_soc PRIVATE
 	lk/lk_boot.c
 	lk/lk_debug.c
 	lk/lk_devices.c
+	lk/lk_i2c.c
 	lk/lk_patches.c
 )
 
