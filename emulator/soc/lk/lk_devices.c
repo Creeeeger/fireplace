@@ -220,3 +220,124 @@ static void max77705_block_write(uint8_t bus, uint8_t slave, uint8_t reg,
 	}
 }
 
+static uint32_t bswap32_value(uint32_t value)
+{
+	return ((value & UINT32_C(0x000000ff)) << 24) |
+	       ((value & UINT32_C(0x0000ff00)) << 8) |
+	       ((value & UINT32_C(0x00ff0000)) >> 8) |
+	       ((value & UINT32_C(0xff000000)) >> 24);
+}
+
+static void cs40l2x_write_reg(uint32_t reg, uint32_t value)
+{
+	for (size_t i = 0; i < cs40l2x_reg_count; i++) {
+		if (cs40l2x_regs[i].reg == reg) {
+			cs40l2x_regs[i].value = value;
+			return;
+		}
+	}
+
+	if (cs40l2x_reg_count < LK_CS40L2X_REG_COUNT) {
+		cs40l2x_regs[cs40l2x_reg_count].reg = reg;
+		cs40l2x_regs[cs40l2x_reg_count].value = value;
+		cs40l2x_reg_count++;
+	}
+}
+
+static uint32_t cs40l2x_read_reg(uint32_t reg)
+{
+	for (size_t i = 0; i < cs40l2x_reg_count; i++) {
+		if (cs40l2x_regs[i].reg == reg)
+			return cs40l2x_regs[i].value;
+	}
+
+	return 0;
+}
+
+bool lk_device_byte_read(uint8_t bus, uint8_t slave, uint8_t reg,
+			 uint8_t *value)
+{
+	uint8_t *regs;
+
+	max77705_seed();
+	regs = max77705_regs_for_byte_i2c(bus, slave, false);
+	if (!regs)
+		return false;
+	*value = regs[reg];
+	return true;
+}
+
+bool lk_device_byte_write(uint8_t bus, uint8_t slave, uint8_t reg,
+			  uint8_t value)
+{
+	uint8_t *regs;
+
+	max77705_seed();
+	regs = max77705_regs_for_byte_i2c(bus, slave, true);
+	if (!regs)
+		return false;
+	if (bus == LK_MUIC_I2C_BUS &&
+	    (slave == LK_MUIC_I2C_READ_SLAVE ||
+	     slave == LK_MUIC_I2C_WRITE_SLAVE))
+		muic_write_reg(reg, value);
+	else
+		regs[reg] = value;
+	return true;
+}
+
+bool lk_device_block_read(uint8_t bus, uint8_t slave, uint8_t reg,
+			  uint8_t *buffer, size_t length)
+{
+	uint8_t *regs;
+
+	max77705_seed();
+	if (bus == LK_FG_I2C_BUS && slave == LK_FG_I2C_READ_SLAVE) {
+		fuel_gauge_seed();
+		fuel_gauge_read(reg, buffer, length);
+		return true;
+	}
+	regs = max77705_regs_for_block_i2c(bus, slave);
+	if (!regs)
+		return false;
+	max77705_block_read(regs, reg, buffer, length);
+	return true;
+}
+
+bool lk_device_block_write(uint8_t bus, uint8_t slave, uint8_t reg,
+			   const uint8_t *buffer, size_t length)
+{
+	if (bus == LK_FG_I2C_BUS && slave == LK_FG_I2C_WRITE_SLAVE) {
+		fuel_gauge_seed();
+		fuel_gauge_write(reg, buffer, length);
+		return true;
+	}
+	if (!max77705_regs_for_block_i2c(bus, slave))
+		return false;
+	max77705_block_write(bus, slave, reg, buffer, length);
+	return true;
+}
+
+bool lk_device_word_write(uint8_t bus, uint8_t slave, uint32_t reg,
+			  uint32_t value)
+{
+	if (bus != LK_CS40L2X_I2C_BUS || slave != LK_CS40L2X_I2C_SLAVE)
+		return false;
+	cs40l2x_write_reg(reg, value);
+	return true;
+}
+
+bool lk_device_word_read(uint8_t bus, uint8_t slave, uint32_t reg,
+			 uint32_t *value)
+{
+	if (bus != LK_CS40L2X_I2C_BUS || slave != LK_CS40L2X_I2C_SLAVE)
+		return false;
+	*value = bswap32_value(cs40l2x_read_reg(reg));
+	return true;
+}
+
+void lk_devices_reset(void)
+{
+	fuel_gauge_i2c_seeded = false;
+	max77705_i2c_seeded = false;
+	cs40l2x_reg_count = 0;
+}
