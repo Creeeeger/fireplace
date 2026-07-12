@@ -2,6 +2,16 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(UNICORN REQUIRED IMPORTED_TARGET unicorn)
 pkg_check_modules(CRYPTO REQUIRED IMPORTED_TARGET libcrypto)
 
+# LK decodes full-screen JPEGs one guest instruction at a time.  Use the host
+# jpeg-turbo library for the equivalent framebuffer operation.
+find_path(TURBOJPEG_INCLUDE_DIR turbojpeg.h
+	PATHS /opt/homebrew/include /usr/local/include)
+find_library(TURBOJPEG_LIBRARY turbojpeg
+	PATHS /opt/homebrew/lib /usr/local/lib)
+if(NOT TURBOJPEG_INCLUDE_DIR OR NOT TURBOJPEG_LIBRARY)
+	message(FATAL_ERROR "jpeg-turbo is required for LK image acceleration")
+endif()
+
 add_library(fireplace_soc STATIC
 	apm/apm.c
 	cmu/cmu.c
@@ -68,16 +78,19 @@ target_sources(fireplace_soc PRIVATE
 	lk/lk_boot.c
 	lk/lk_debug.c
 	lk/lk_devices.c
+	lk/lk_display.c
 	lk/lk_i2c.c
 	lk/lk_patches.c
 )
 
 target_include_directories(fireplace_soc PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}
+	${TURBOJPEG_INCLUDE_DIR}
 )
 
 target_link_libraries(fireplace_soc PRIVATE
 	fireplace_include
 	PkgConfig::UNICORN
 	PkgConfig::CRYPTO
+	${TURBOJPEG_LIBRARY}
 )
