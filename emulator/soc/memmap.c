@@ -14,64 +14,84 @@
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <inttypes.h>
 #include <stdio.h>
 
 #include <unicorn/unicorn.h>
 
-#include <fireplace/core/macros.h>
+#include <fireplace/soc/fb/fb.h>
 #include <fireplace/soc/memmap.h>
 
-/* TODO: Only 32-bit address space is mapped right now */
-// From: https://github.com/exynos990-mainline/lk3rd/blob/dev/platform/exynos9830/mmu/mmu.c
-struct memory_mapping exynos990_12gb_memory[] = {
-	// We can't really map TZ memory
-	// { 0x00000000, 0xBFFFFFFFF, UC_PROT_READ },
-
-	/* Unknown - TT_DEVICE(?) */
-	{ 0x02000000, 0x00200000, UC_PROT_READ  },
-	/* Internal PERI block 1 */
-	{ 0x03000000, 0x00200000, UC_PROT_READ  },
-	/* Internal PERI block 2 */
-	{ 0x04000000, 0x00200000, UC_PROT_READ  },
-	/* SIREX Virtual iRAM */
-	{ 0x06000000, 0x0A000000, UC_PROT_READ  },
-	/* Public PERI block 1 */
-	{ 0x10000000, 0x10000000, UC_PROT_ALL   },
-	/* RAM block 1 */
-	{ 0x80000000, 0x79800000, UC_PROT_ALL   },
-	/* Unknown - TT_NONCACHEBLE(?) */
-	{ 0xF9800000, 0x03C00000, UC_PROT_ALL  },
-	/* RAM block 2 */
-	{ 0xFD400000, 0x00500000, UC_PROT_ALL   },
-	/* Unknown - TT_NONCACHEBLE(?) */
-	{ 0xFD900000, 0x00200000, UC_PROT_ALL  },
-	/* RAM block 3 */
-	{ 0xFDB00000, 0x02500000, UC_PROT_ALL   },
-	/* End of 32-bit address space. */
-	{ 0x00000000, 0x00000000, UC_PROT_NONE  },
+/* This sparse host map mirrors the firmware's early identity map. Device
+ * behavior is supplied by MMIO hooks; the broad regions merely give Unicorn
+ * backing storage for registers and RAM the firmware expects to touch. */
+static const struct memory_mapping exynos990_12gb_memory[] = {
+	{UINT64_C(0x00000000), UINT64_C(0x00100000), UC_PROT_ALL},
+	{UINT64_C(0x02000000), UINT64_C(0x00200000), UC_PROT_ALL},
+	{UINT64_C(0x03000000), UINT64_C(0x00200000), UC_PROT_READ},
+	{UINT64_C(0x04000000), UINT64_C(0x00200000), UC_PROT_READ},
+	{UINT64_C(0x06000000), UINT64_C(0x0a000000), UC_PROT_READ},
+	{UINT64_C(0x10000000), UINT64_C(0x10000000), UC_PROT_ALL},
+	{UINT64_C(0x80000000), UINT64_C(0x79800000), UC_PROT_ALL},
+	{UINT64_C(0xf9800000), UINT64_C(0x03c00000), UC_PROT_ALL},
+	{UINT64_C(0xfd400000), UINT64_C(0x00500000), UC_PROT_ALL},
+	{UINT64_C(0xfd900000), UINT64_C(0x00200000), UC_PROT_ALL},
+	{UINT64_C(0xfdb00000), UINT64_C(0x02500000), UC_PROT_ALL},
+	{UINT64_C(0x880000000), UINT64_C(0x280000000), UC_PROT_ALL},
+	{0, 0, UC_PROT_NONE},
 };
+
+static uc_err map_regular_memory(uc_engine *uc, uint64_t base, uint64_t size,
+				 uint32_t perms)
+{
+	if (size == 0)
+		return UC_ERR_OK;
+	printf("Mapping memory: A: 0x%" PRIx64 " L: 0x%" PRIx64 "\n",
+	       base, size);
+	return uc_mem_map(uc, base, size, perms);
+}
+
+static uc_err map_memory_region(uc_engine *uc,
+				const struct memory_mapping *map)
+{
+	const uint64_t map_end = map->base + map->size;
+	const uint64_t fb_end = FB_ADDRESS + FB_SIZE;
+	uc_err err;
+
+	if (map->base > FB_ADDRESS || map_end < fb_end)
+		return map_regular_memory(uc, map->base, map->size, map->perms);
+
+	err = map_regular_memory(uc, map->base, FB_ADDRESS - map->base,
+				 map->perms);
+	if (err != UC_ERR_OK)
+		return err;
+
+	printf("Mapping shared framebuffer: A: 0x%x L: 0x%x\n",
+	       FB_ADDRESS, FB_SIZE);
+	err = uc_mem_map_ptr(uc, FB_ADDRESS, FB_SIZE, map->perms, framebuffer);
+	if (err != UC_ERR_OK)
+		return err;
+
+	return map_regular_memory(uc, fb_end, map_end - fb_end, map->perms);
+}
 
 int memmap_soc(uc_engine *uc, enum board_memory_type board)
 {
-	struct memory_mapping map;
-	int ret = 0;
+	uc_err err;
 
-	if (board == MEMORY_8GB)
-	{
+	if (board == MEMORY_8GB) {
 		printf("8GB boards are not supported yet!\n");
-		return -1;
+		return UC_ERR_ARG;
 	}
 
-	for (int i = 0; exynos990_12gb_memory[i].perms != UC_PROT_NONE; i++)
-	{
-		map = exynos990_12gb_memory[i];
-
-		// TODO: Change this to 64-bit when mapping 64-bit address space!
-		printf("Mapping memory: A: 0x%x L: 0x%x\n", map.base, map.size);
-
-		ret = uc_mem_map(uc, map.base, map.size, map.perms);
-		uc_handle_error("Failed to map memory!", ret);
+	for (size_t i = 0;
+	     exynos990_12gb_memory[i].perms != UC_PROT_NONE; i++) {
+		err = map_memory_region(uc, &exynos990_12gb_memory[i]);
+		if (err != UC_ERR_OK) {
+			fprintf(stderr, "Failed to map memory: %s\n",
+				uc_strerror(err));
+			return err;
+		}
 	}
-
-	return ret;
+	return UC_ERR_OK;
 }
