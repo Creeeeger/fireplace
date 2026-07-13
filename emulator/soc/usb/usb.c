@@ -14,10 +14,8 @@
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <pthread.h>
-#include <stdatomic.h>
+#include <inttypes.h>
 #include <stdio.h>
-#include <string.h>
 
 #include <unicorn/unicorn.h>
 
@@ -28,7 +26,9 @@
 
 int usb_phy_init(struct uc_struct *uc_s)
 {
+	(void)uc_s;
 	printf("?>>> usb_phy_init\n");
+	return UC_ERR_OK;
 }
 
 void usb_phy_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64_t value, void *user_data)
@@ -36,39 +36,33 @@ void usb_phy_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size, i
 	switch(address)
 	{
 		case USB_PHY_ADDRESS(EXYNOS_USBCON_UTMI):
-			printf("UTMI setup! R: 0x%lx\n", value);
+			printf("UTMI setup! R: 0x%" PRIx64 "\n", (uint64_t)value);
 			break;
 		case USB_PHY_ADDRESS(EXYNOS_USBCON_HSP_TUNE):
-			printf("Tuning setup! R: 0x%lx\n", value);
+			printf("Tuning setup! R: 0x%" PRIx64 "\n",
+			       (uint64_t)value);
 			break;
 		case USB_PHY_ADDRESS(EXYNOS_USBCON_LINK_CTRL):
-			printf("Link setup! R: 0x%lx\n", value);
+			printf("Link setup! R: 0x%" PRIx64 "\n", (uint64_t)value);
 			break;
 		case USB_PHY_ADDRESS(EXYNOS_USBCON_HSP):
-			printf("HSP setup! R: 0x%lx\n", value);
+			printf("HSP setup! R: 0x%" PRIx64 "\n", (uint64_t)value);
 			break;
 		case USB_PHY_ADDRESS(EXYNOS_USBCON_HSP_TEST):
-			printf("HSP test? R: 0x%lx\n", value);
+			printf("HSP test? R: 0x%" PRIx64 "\n", (uint64_t)value);
 			break;
 		default:
 			printf("PHY> Unhandled read. ");
-			printf("> A: 0x%lx R: 0x%lx\n", address, value);
+			printf("> A: 0x%" PRIx64 " R: 0x%" PRIx64 "\n",
+			       address, (uint64_t)value);
 			break;
 	}
 }
 
-void* usb_buf;
-
 int usb_init(struct uc_struct *uc_s)
 {
 	printf("= usb_init\n");
-	usb_buf = malloc(1024);
-	uc_mem_write(uc_s, USB_ADDRESS(rGSNPSID), "\x00\x30", 2);
-}
-
-void halt_usb_stack(uc_engine *uc)
-{
-	printf("= HALTING\n");
+	return uc_mem_write(uc_s, USB_ADDRESS(rGSNPSID), "\x00\x30", 2);
 }
 
 uc_err usb_power_switch(uc_engine *uc, uint32_t dctl_buf, bool pwr)
@@ -80,7 +74,8 @@ uc_err usb_power_switch(uc_engine *uc, uint32_t dctl_buf, bool pwr)
 	else
 		dctl_buf &= ~(0 << 30);
 
-	err = uc_mem_write(uc, USB_ADDRESS(rDCTL), &dctl_buf, sizeof(usb_buf));
+	err = uc_mem_write(uc, USB_ADDRESS(rDCTL), &dctl_buf,
+			   sizeof(dctl_buf));
 
 	printf("---------USB controller power state changed: %i ---------\n", pwr);
 
@@ -132,20 +127,13 @@ uc_err handle_epcmd(uc_engine *uc, uint64_t addr)
 
 	epcmd_buf &= ~(1 << 10);
 
-	err = uc_mem_write(uc, addr, &epcmd_buf, sizeof(usb_buf));
+	err = uc_mem_write(uc, addr, &epcmd_buf, sizeof(epcmd_buf));
 
 	return err;
 }
 
 void usb_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64_t value, void *user_data)
 {
-	int pc;
-
-	if (uc_reg_read(uc, UC_ARM64_REG_PC, &pc) != UC_ERR_OK)
-		printf("Failed to read PC register\n");
-	else
-		printf("= PC at 0x%x =\n", pc);
-
 	switch(address)
 	{
 		case USB_ADDRESS(rDCTL):
@@ -158,7 +146,7 @@ void usb_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64
 			printf("USB: reading Global Frame Length Adjustment Register\n");
 			break;
 
-		// Are these addresses static?
+			/* G986B endpoint-command registers outside the named DWC map. */
 		case 0x10e0c80c:
 			handle_epcmd(uc, 0x10e0c80c);
 			break;
@@ -174,6 +162,7 @@ void usb_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64
 				printf("USB> Unhandled write. ");
 			break;
 
-		printf("> A: 0x%lx R: 0x%lx\n", address, value);
 	}
+	printf("> A: 0x%" PRIx64 " R: 0x%" PRIx64 "\n", address,
+	       (uint64_t)value);
 }

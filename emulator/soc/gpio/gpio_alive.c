@@ -37,22 +37,20 @@ int gpio_alive_init(struct uc_struct *uc_s)
 	printf("= gpio_alive_init\n");
 	printf("= initializing button pins...\n");
 
-	/* Setup pullups */
+	/* Buttons are active-low, so idle inputs must remain pulled high. */
 	exynos_gpio_set_pull(uc_s, bank_volume, 3, GPIO_PULL_UP);
 	exynos_gpio_set_pull(uc_s, bank_volume, 4, GPIO_PULL_UP);
 	exynos_gpio_set_pull(uc_s, bank_power, 4, GPIO_PULL_UP);
 
-	/* Pins are buttons, so input. */
 	exynos_gpio_cfg_pin(uc_s, bank_volume, 3, GPIO_INPUT);
 	exynos_gpio_cfg_pin(uc_s, bank_volume, 4, GPIO_INPUT);
 	exynos_gpio_cfg_pin(uc_s, bank_power, 4, GPIO_INPUT);
 
-	/* Set initial GPIO values. */
 	exynos_gpio_set_value(uc_s, bank_volume, 3, 1);
 	exynos_gpio_set_value(uc_s, bank_volume, 4, 1);
 	exynos_gpio_set_value(uc_s, bank_power, 4, 1);
 
-	printf("= intialized button pins!\n");
+	printf("= initialized button pins!\n");
 	return 0;
 }
 
@@ -64,7 +62,7 @@ void gpio_alive_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size
 	{
 		exynos_gpio_set_value(uc, bank_volume, 3, keys[VOL_UP]);
 		exynos_gpio_set_value(uc, bank_volume, 4, keys[VOL_DOWN]);
-		exynos_gpio_set_value(uc, bank_power, 3, keys[POWER]);
+		exynos_gpio_set_value(uc, bank_power, 4, keys[POWER]);
 	}
 
 	pthread_mutex_unlock(&gpio_alive_lock);
