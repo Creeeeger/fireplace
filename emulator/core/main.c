@@ -80,6 +80,23 @@ static void usage(const char *program)
 	       "[--boot-mode android|recovery|download]\n", program);
 }
 
+static bool parse_boot_mode(const char *value,
+			    enum fireplace_boot_mode *mode)
+{
+	if (strcmp(value, "android") == 0)
+		*mode = FIREPLACE_BOOT_ANDROID;
+	else if (strcmp(value, "recovery") == 0)
+		*mode = FIREPLACE_BOOT_RECOVERY;
+	else if (strcmp(value, "download") == 0)
+		*mode = FIREPLACE_BOOT_DOWNLOAD;
+	else {
+		fprintf(stderr, "Invalid boot mode: %s\n", value);
+		return false;
+	}
+	return true;
+}
+
+
 int main(int argc, char **argv)
 {
 	struct fireplace_emulator_options options = {0};
@@ -98,6 +115,10 @@ int main(int argc, char **argv)
 				return 2;
 			}
 			options.lun_directory = argv[i];
+		} else if (strcmp(argv[i], "--boot-mode") == 0) {
+			if (++i == argc ||
+			    !parse_boot_mode(argv[i], &options.boot_mode))
+				return 2;
 		} else if (strcmp(argv[i], "--help") == 0 ||
 			   strcmp(argv[i], "-h") == 0) {
 			usage(argv[0]);
