@@ -17,6 +17,10 @@
 #ifndef FIREPLACE_CORE_H
 #define FIREPLACE_CORE_H
 
+#include <fireplace/core/emulator.h>
+
 void create_emulator_thread(void);
+void set_emulator_boot_mode(enum fireplace_boot_mode mode);
+enum fireplace_boot_mode get_emulator_boot_mode(void);
 
 #endif

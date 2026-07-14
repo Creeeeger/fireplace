@@ -73,18 +73,42 @@ void gui_init(void)
 
 void blit_window(struct nk_context *ctx)
 {
+	static enum fireplace_boot_mode selected_mode = FIREPLACE_BOOT_ANDROID;
+	static bool mode_initialized;
 	state emuState = 0;
 
 	emuState = atomic_load(&sharedState);
+	if (!mode_initialized) {
+		selected_mode = get_emulator_boot_mode();
+		mode_initialized = true;
+	}
 
 	/* GUI */
-	if (nk_begin(ctx, "Emulator setup", nk_rect(0, 0, 230, 250),
+	if (nk_begin(ctx, "Emulator setup", nk_rect(0, 0, 360, 190),
 		     NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
 			 NK_WINDOW_MINIMIZABLE | NK_WINDOW_TITLE))
 	{
 		nk_layout_row_static(ctx, 30, 80, 1);
 		if (emuState != STATE_RUNNING)
 		{
+			nk_layout_row_dynamic(ctx, 30, 3);
+			if (nk_option_label(ctx, "Android",
+					    selected_mode == FIREPLACE_BOOT_ANDROID)) {
+				selected_mode = FIREPLACE_BOOT_ANDROID;
+				set_emulator_boot_mode(selected_mode);
+			}
+			if (nk_option_label(ctx, "Recovery",
+					    selected_mode == FIREPLACE_BOOT_RECOVERY)) {
+				selected_mode = FIREPLACE_BOOT_RECOVERY;
+				set_emulator_boot_mode(selected_mode);
+			}
+			if (nk_option_label(ctx, "Download",
+					    selected_mode == FIREPLACE_BOOT_DOWNLOAD)) {
+				selected_mode = FIREPLACE_BOOT_DOWNLOAD;
+				set_emulator_boot_mode(selected_mode);
+			}
+
+			nk_layout_row_dynamic(ctx, 30, 1);
 			if (nk_button_label(ctx, "Start"))
 				create_emulator_thread();
 		}
