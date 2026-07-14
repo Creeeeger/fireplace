@@ -17,30 +17,16 @@
 #ifndef FIREPLACE_PERIPHERALS_H
 #define FIREPLACE_PERIPHERALS_H
 
-#include <stdbool.h>
+#include <stdint.h>
 
 #include <unicorn/unicorn.h>
 
-struct peripheral
-{
-	/* Let's be pretty. */
-	char* name;
-
-	/* Do we need a callback? */
-	bool hook;
-
-	union { uint64_t addressBase; uint64_t base; };
-	union { uint64_t addressSize; uint64_t size; };
-
-	/* This one is required. Called on soc init. Never again. */
-	int (*peri_init)(struct uc_struct*);
-
-	/* This one is not. Called on every write to the address range */
-	uc_cb_hookmem_t peri_hook;
-
-	// TODO: Need to add a hook for when it's trying to read
-
-	uc_hook hh;
+struct peripheral {
+	const char *name;
+	uint64_t base;
+	uint64_t size;
+	int (*init)(uc_engine *uc);
+	uc_cb_hookmem_t access;
 };
 
 #endif
