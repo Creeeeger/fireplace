@@ -14,124 +14,111 @@
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <stdint.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <unicorn/unicorn.h>
 
 #include <fireplace/core/emulator.h>
-#include <fireplace/core/macros.h>
 #include <fireplace/soc/memmap.h>
 #include <fireplace/soc/soc.h>
 
-#define INT_BIN_PATH "/home/umer/x1s-unbrick/bl2"
-#define INT_BIN_ADDR 0x14f00000
-#define INT_BIN_SIZE 442368
-
-/*
- * load_image functions:
- * Copyright (c) 2023, Ivaylo Ivanov <ivo.ivanov@null.net>
- * https://github.com/ivoszbg/LAEmu/blob/main/main.c
- * Modified lightly.
-*/
-
-static inline uc_err
-load_image(uc_engine *uc, const char *file, uint64_t base, uint64_t *last)
-{
-	char buf[1024];
-	FILE *f;
-	long sz;
-	uc_err err;
-	uint64_t addr = base;
-
-	printf("Opening file: %s\n", file);
-
-	if (!(f = fopen(file, "r")))
-		return UC_ERR_HANDLE;
-
-	printf("Opened fine!\n", file);
-
-	fseek(f, 0L, SEEK_END);
-	sz = ftell(f);
-	fseek(f, 0L, SEEK_SET);
-
-	while (ftell(f) != sz) {
-		size_t n = fread(buf, 1, 1024, f);
-		*last = addr;
-		if ((err = uc_mem_write(uc, addr, buf, n)) != UC_ERR_OK)
-			return err;
-		addr += n;
-	}
-
-	return err;
-}
+#define BOOTCHAIN_DIRECTORY FIREPLACE_SOURCE_DIR "/bootchain/G986B"
+#define BOOTROM_END UINT64_C(0x20000)
 
 atomic_int sharedState = 0;
 
-static inline int emulator_init(void)
+int emulator_run(const struct fireplace_emulator_options *options)
 {
-	uc_engine *uc;
-	uint64_t end;
-	int err = 0;
+	struct fireplace_emulator_options defaults = {0};
+	struct soc_boot_config boot_config = {0};
+	uc_engine *uc = NULL;
+	uint64_t start = 0;
+	uint64_t sp = UINT64_C(0x02021400);
+	uint64_t pstate = UINT64_C(0x3cd);
+	uc_err err;
+	int result = EXIT_FAILURE;
 
+	if (!options)
+		options = &defaults;
+	if (!options->lun_directory || options->lun_directory[0] == '\0') {
+		fprintf(stderr, "--lun-dir PATH is required for UFS boot\n");
+		return EXIT_FAILURE;
+	}
+	boot_config.bootchain_directory = BOOTCHAIN_DIRECTORY;
+	boot_config.lun_directory = options->lun_directory;
+	boot_config.boot_mode = options->boot_mode;
+	boot_config.headless = options->headless;
 	printf("== Emulator starting ==\n");
+	printf("Boot media: ufs\n");
+	printf("LUN dumps: %s\n", options->lun_directory);
+	printf("Boot mode: %s\n",
+	       options->boot_mode == FIREPLACE_BOOT_RECOVERY ? "recovery" :
+	       options->boot_mode == FIREPLACE_BOOT_DOWNLOAD ? "download" :
+	       "android");
+	printf("Bootchain support files: %s\n", BOOTCHAIN_DIRECTORY);
 
-#if defined(INT_BIN_PATH)
-	printf("Using hardcoded :[ binary path %s\n", INT_BIN_PATH);
-#else
-	printf("No binary path provided! Bailing out\n");
-	return -1;
-#endif
-
-	/* We have all we need - setup unicorn context */
 	err = uc_open(UC_ARCH_ARM64, UC_MODE_ARM, &uc);
-	uc_handle_error("Failed to open UC engine!", err);
-
-	if (memmap_soc(uc, MEMORY_12GB))
-	{
-		printf("Failed to map memory for SoC!\n");
-		return -1;
+	if (err != UC_ERR_OK) {
+		fprintf(stderr, "Failed to open Unicorn: %s\n", uc_strerror(err));
+		return EXIT_FAILURE;
+	}
+	if (memmap_soc(uc, MEMORY_12GB) != UC_ERR_OK) {
+		fprintf(stderr, "Failed to map SoC memory\n");
+		goto out;
+	}
+	err = uc_reg_write(uc, UC_ARM64_REG_SP, &sp);
+	if (err == UC_ERR_OK)
+		err = uc_reg_write(uc, UC_ARM64_REG_PSTATE, &pstate);
+	if (err != UC_ERR_OK) {
+		fprintf(stderr, "Failed to initialize CPU state: %s\n",
+			uc_strerror(err));
+		goto out;
+	}
+	err = (uc_err)soc_peripherals_init(uc, &boot_config);
+	if (err != UC_ERR_OK) {
+		fprintf(stderr, "Failed to initialize SoC: %s\n", uc_strerror(err));
+		goto out;
 	}
 
-	err = load_image(uc, INT_BIN_PATH, INT_BIN_ADDR, &end);
-	uc_handle_error("Failed to load the initial binary to memory!", err);
-
-	/*
-	 * Basic emulator setup is done. Now, init peripherals.
-	 */
-	err = soc_peripherals_init(uc);
-	if (err)
-	{
-		printf("Failed to initialize peripherals!\n");
-		return -1;
-	}
-
-	printf("=== All good! Starting emulator! ===\n");
 	atomic_store(&sharedState, STATE_RUNNING);
-	if ((err = uc_emu_start(uc, INT_BIN_ADDR, end, 0, 0)) != UC_ERR_OK)
-	{
-		int pc;
-
-		printf("\n------> fireplace exception: %s\n", uc_strerror(err));
-		atomic_store(&sharedState, STATE_CRASHED);
-		if (uc_reg_read(uc, UC_ARM64_REG_PC, &pc) != UC_ERR_OK)
-		{
-			printf("Failed to read PC register\n");
+	for (;;) {
+		err = uc_emu_start(uc, start, BOOTROM_END, 0, 0);
+		if (err != UC_ERR_OK) {
+			fprintf(stderr, "Emulator failure: %s\n", uc_strerror(err));
+			break;
 		}
-		else
-		{
-			printf("= PC at 0x%x =\n", pc);
+		if (soc_bootchain_failed())
+			break;
+		if (soc_bootchain_complete()) {
+			result = EXIT_SUCCESS;
+			break;
 		}
-		uc_close(uc);
-		return -1;
+		if (soc_take_resume_request(&start))
+			continue;
+		fprintf(stderr, "Emulation stopped before the LK milestone\n");
+		break;
 	}
 
-	atomic_store(&sharedState, STATE_OFF);
-	return 0;
+out:
+	atomic_store(&sharedState,
+		     result == EXIT_SUCCESS ? STATE_OFF : STATE_CRASHED);
+	err = uc_close(uc);
+	if (err != UC_ERR_OK) {
+		fprintf(stderr, "Failed to close Unicorn: %s\n", uc_strerror(err));
+		result = EXIT_FAILURE;
+	}
+	return result;
 }
 
-void* _emulator_init(void* dummy)
+void *emulator_thread_main(void *arg)
 {
-	emulator_init();
-	return dummy;
+	return (void *)(intptr_t)emulator_run(arg);
+}
+
+void *_emulator_init(void *dummy)
+{
+	return emulator_thread_main(dummy);
 }

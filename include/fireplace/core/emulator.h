@@ -32,6 +32,8 @@ struct fireplace_emulator_options {
 	bool headless;
 };
 
+int emulator_run(const struct fireplace_emulator_options *options);
+void *emulator_thread_main(void *arg);
 void *_emulator_init(void *dummy);
 
 typedef enum {

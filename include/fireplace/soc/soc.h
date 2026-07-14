@@ -30,10 +30,7 @@ struct soc_boot_config {
 	bool headless;
 };
 
-
-int soc_peripherals_init(uc_engine *uc);
-int soc_peripherals_init_configured(uc_engine *uc,
-				    const struct soc_boot_config *config);
+int soc_peripherals_init(uc_engine *uc, const struct soc_boot_config *config);
 bool soc_bootchain_complete(void);
 bool soc_bootchain_failed(void);
 const char *soc_active_firmware_stage(void);

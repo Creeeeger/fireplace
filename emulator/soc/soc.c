@@ -204,7 +204,7 @@ static void interrupt_cb(uc_engine *uc, uint32_t intno, void *user_data)
 	uc_emu_stop(uc);
 }
 
-int soc_peripherals_init_configured(uc_engine *uc, const struct soc_boot_config *config)
+int soc_peripherals_init(uc_engine *uc, const struct soc_boot_config *config)
 {
 	struct bootchain_config bootchain_config = {0};
 	uc_hook interrupts;
@@ -247,10 +247,4 @@ int soc_peripherals_init_configured(uc_engine *uc, const struct soc_boot_config 
 		fprintf(stderr, "Failed to initialize bootchain: %s\n",
 			uc_strerror(err));
 	return err;
-}
-
-int soc_peripherals_init(uc_engine *uc)
-{
-	(void)uc;
-	return UC_ERR_ARG;
 }
