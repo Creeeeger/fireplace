@@ -34,7 +34,6 @@ struct fireplace_emulator_options {
 
 int emulator_run(const struct fireplace_emulator_options *options);
 void *emulator_thread_main(void *arg);
-void *_emulator_init(void *dummy);
 
 typedef enum {
 	STATE_OFF,

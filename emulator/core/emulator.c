@@ -117,8 +117,3 @@ void *emulator_thread_main(void *arg)
 {
 	return (void *)(intptr_t)emulator_run(arg);
 }
-
-void *_emulator_init(void *dummy)
-{
-	return emulator_thread_main(dummy);
-}
