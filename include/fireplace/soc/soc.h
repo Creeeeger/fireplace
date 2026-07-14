@@ -17,7 +17,19 @@
 #ifndef FIREPLACE_SOC_H
 #define FIREPLACE_SOC_H
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <unicorn/unicorn.h>
+
+#include <fireplace/core/emulator.h>
+
+struct soc_boot_config {
+	const char *bootchain_directory;
+	const char *lun_directory;
+	enum fireplace_boot_mode boot_mode;
+	bool headless;
+};
+
 
 int soc_peripherals_init(uc_engine *uc);
 
