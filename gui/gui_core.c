@@ -50,12 +50,11 @@
 #include <fireplace/core/emulator.h>
 #include <fireplace/gui/gui.h>
 #include <fireplace/soc/fb/fb.h>
-#include <fireplace/soc/uart/uart.h>
 #include <fireplace/soc/hardware_buttons/hardware_buttons.h>
 
-#define RESOLUTION_SCALE (0.4)
-#define WINDOW_WIDTH (1440 * RESOLUTION_SCALE)
-#define WINDOW_HEIGHT (3200 * RESOLUTION_SCALE)
+#define DEFAULT_RESOLUTION_SCALE (0.4)
+#define WINDOW_MARGIN 64
+#define TARGET_FRAME_MS (1000 / 30)
 
 void gui_init(void)
 {
@@ -138,25 +137,32 @@ void blit_window(struct nk_context *ctx)
 	nk_end(ctx);
 }
 
-void blit_uart_window(struct nk_context *ctx)
+static void choose_window_size(int *width, int *height)
 {
-	atomic_load(&line);
+	double scale = DEFAULT_RESOLUTION_SCALE;
+	SDL_Rect usable;
 
-	if (nk_begin(ctx, "UART window", nk_rect(50, 50, 500, 400),
-		     NK_WINDOW_BORDER | NK_WINDOW_MOVABLE |
-			 NK_WINDOW_MINIMIZABLE | NK_WINDOW_TITLE))
-	{
-		nk_layout_row_dynamic(ctx, UART_BUF_SIZE * 2, 1);
+	if (SDL_GetDisplayUsableBounds(0, &usable) == 0) {
+		int usable_width = usable.w - WINDOW_MARGIN;
+		int usable_height = usable.h - WINDOW_MARGIN;
+		double width_scale;
+		double height_scale;
 
-		pthread_mutex_lock(&uart_lock);
-		nk_label_colored_wrap(ctx, uart_buf, nk_rgb(255, 255, 255));
-		pthread_mutex_unlock(&uart_lock);
-
-		// This is the worst shit i've ever written
-		nk_window_set_scroll(ctx, 0, (line * 27));
+		if (usable_width > 0 && usable_height > 0) {
+			width_scale = (double)usable_width / FB_WIDTH;
+			height_scale = (double)usable_height / FB_HEIGHT;
+			if (scale > width_scale)
+				scale = width_scale;
+			if (scale > height_scale)
+				scale = height_scale;
+		}
 	}
-
-	nk_end(ctx);
+	*width = (int)(FB_WIDTH * scale);
+	*height = (int)(FB_HEIGHT * scale);
+	if (*width < 1)
+		*width = 1;
+	if (*height < 1)
+		*height = 1;
 }
 
 void blit_hardware_button_window(struct nk_context *ctx)
@@ -195,22 +201,41 @@ static GLuint fb_texture = 0;
 
 static GLuint prepare_fb_texture()
 {
+	bool texture_created = false;
+
 	if (fb_texture == 0)
 	{
 		glGenTextures(1, &fb_texture);
+		texture_created = true;
 	}
 
 	glBindTexture(GL_TEXTURE_2D, fb_texture);
-	glPixelStorei(GL_UNPACK_ROW_LENGTH, 1440);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, FB_WIDTH);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-	pthread_mutex_lock(&fb_lock);
+	if (texture_created)
+	{
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FB_WIDTH,
+			     FB_HEIGHT, 0, GL_BGRA, GL_UNSIGNED_BYTE,
+			     framebuffer);
+	} else {
+		/*
+		 * The guest writes directly into framebuffer through
+		 * uc_mem_map_ptr(). Sampling once per GUI frame avoids a memory
+		 * callback for every guest store and cannot miss a presentation.
+		 */
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, FB_WIDTH,
+				(GLsizei)FB_HEIGHT, GL_BGRA, GL_UNSIGNED_BYTE,
+				framebuffer);
+	}
 
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FB_WIDTH, FB_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, framebuffer);
-
-	pthread_mutex_unlock(&fb_lock);
-
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	if (texture_created)
+	{
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	}
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	return fb_texture;
@@ -253,10 +278,17 @@ void *gui_core(void *dummy)
 	/* GUI */
 	struct nk_context *ctx;
 
+	gui_init();
+	choose_window_size(&win_width, &win_height);
+
 	win = SDL_CreateWindow("Fireplace",
-			       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-			       WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
+				       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+				       win_width, win_height,
+				       SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN |
+					       SDL_WINDOW_ALLOW_HIGHDPI |
+					       SDL_WINDOW_RESIZABLE);
 	glContext = SDL_GL_CreateContext(win);
+	SDL_GL_SetSwapInterval(1);
 	SDL_GetWindowSize(win, &win_width, &win_height);
 
 	/* GUI */
@@ -269,6 +301,8 @@ void *gui_core(void *dummy)
 
 	while (running)
 	{
+		Uint64 frame_start = SDL_GetTicks64();
+
 		/* Input */
 		SDL_Event evt;
 		nk_input_begin(ctx);
@@ -281,10 +315,13 @@ void *gui_core(void *dummy)
 		nk_input_end(ctx);
 
 		blit_window(ctx);
-		blit_uart_window(ctx);
 		blit_hardware_button_window(ctx);
 
 		render_ogl(win, win_height, win_width);
+
+		Uint64 frame_time = SDL_GetTicks64() - frame_start;
+		if (frame_time < TARGET_FRAME_MS)
+			SDL_Delay(TARGET_FRAME_MS - frame_time);
 	}
 
 cleanup:

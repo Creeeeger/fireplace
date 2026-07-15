@@ -25,9 +25,5 @@ extern pthread_mutex_t main_mutex;
 extern pthread_cond_t main_cond;
 
 extern atomic_int sharedState;
-extern char uart_buf[];
-extern pthread_mutex_t uart_lock;
-
-extern atomic_int line;
 
 #endif
