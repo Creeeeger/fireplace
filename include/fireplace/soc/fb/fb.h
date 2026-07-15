@@ -17,8 +17,6 @@
 #ifndef FIREPLACE_FB_H
 #define FIREPLACE_FB_H
 
-#include <pthread.h>
-
 #include <unicorn/unicorn.h>
 
 #define FB_ADDRESS 0xf1000000
@@ -27,10 +25,8 @@
 #define FB_BPP 4
 #define FB_SIZE (FB_WIDTH * FB_HEIGHT * FB_BPP)
 
-extern pthread_mutex_t fb_lock;
 extern unsigned char framebuffer[];
 
 int fb_init(struct uc_struct*);
-void fb_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64_t value, void *user_data);
 
 #endif

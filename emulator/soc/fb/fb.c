@@ -14,11 +14,7 @@
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <pthread.h>
-#include <stdatomic.h>
 #include <stdio.h>
-#include <string.h>
-
 #include <unicorn/unicorn.h>
 
 #include <fireplace/soc/fb/fb.h>
@@ -29,12 +25,4 @@ int fb_init(struct uc_struct *uc_s)
 	return 0;
 }
 
-pthread_mutex_t fb_lock = PTHREAD_MUTEX_INITIALIZER;
-unsigned char framebuffer[FB_SIZE] = "\x0";
-
-void fb_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size, int64_t value, void *user_data)
-{
-	pthread_mutex_lock(&fb_lock);
-	framebuffer[address - FB_ADDRESS] = value;
-	pthread_mutex_unlock(&fb_lock);
-}
+_Alignas(0x4000) unsigned char framebuffer[FB_SIZE];
