@@ -82,7 +82,7 @@ lun1.img       4194304
 lun2.img       4194304
 lun3.img       8388608
 lun4.img      16777216
-```s
+```
 
 Only use dumps obtained from hardware you are authorized to access. Fireplace
 is distributed under the [GNU General Public License, version 2](LICENSE).
