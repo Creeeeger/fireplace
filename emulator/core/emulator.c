@@ -51,6 +51,7 @@ int emulator_run(const struct fireplace_emulator_options *options)
 	boot_config.lun_directory = options->lun_directory;
 	boot_config.boot_mode = options->boot_mode;
 	boot_config.headless = options->headless;
+	boot_config.trace_kernel = options->trace_kernel;
 	printf("== Emulator starting ==\n");
 	printf("Boot media: ufs\n");
 	printf("LUN dumps: %s\n", options->lun_directory);
@@ -58,6 +59,8 @@ int emulator_run(const struct fireplace_emulator_options *options)
 	       options->boot_mode == FIREPLACE_BOOT_RECOVERY ? "recovery" :
 	       options->boot_mode == FIREPLACE_BOOT_DOWNLOAD ? "download" :
 	       "android");
+	printf("Kernel instruction trace: %s\n",
+	       options->trace_kernel ? "enabled" : "disabled");
 	printf("Bootchain support files: %s\n", BOOTCHAIN_DIRECTORY);
 
 	err = uc_open(UC_ARCH_ARM64, UC_MODE_ARM, &uc);

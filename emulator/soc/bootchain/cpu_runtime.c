@@ -2,10 +2,38 @@
 #include <inttypes.h>
 #include <stdio.h>
 
+#include <capstone/capstone.h>
+
 #include "bootchain/cpu_internal.h"
 
 static bool runtime_hooks_installed;
 static bool kernel_write_hook_installed;
+static bool kernel_trace_enabled;
+static uint64_t kernel_instruction_count;
+static csh kernel_disassembler;
+static cs_insn *kernel_disassembly;
+
+static void trace_kernel_instruction(uint64_t address, uint32_t instruction)
+{
+	const uint8_t *code = (const uint8_t *)&instruction;
+	size_t code_size = sizeof(instruction);
+	uint64_t disassembly_address = address;
+
+	kernel_instruction_count++;
+	if (kernel_disassembly &&
+	    cs_disasm_iter(kernel_disassembler, &code, &code_size,
+			   &disassembly_address, kernel_disassembly)) {
+		printf("[KERNEL #%012" PRIu64 "] 0x%016" PRIx64
+		       ": 0x%08" PRIx32 "  %-8s %s\n",
+		       kernel_instruction_count, address, instruction,
+		       kernel_disassembly->mnemonic, kernel_disassembly->op_str);
+		return;
+	}
+
+	printf("[KERNEL #%012" PRIu64 "] 0x%016" PRIx64
+	       ": 0x%08" PRIx32 "\n",
+	       kernel_instruction_count, address, instruction);
+}
 
 static bool is_ic_ivau_instruction(uint32_t instruction)
 {
@@ -142,6 +170,9 @@ static void instruction_cb(uc_engine *uc, uint64_t address, uint32_t size,
         uc_mem_read(uc, address, &instruction,
                     sizeof(instruction)) != UC_ERR_OK)
         return;
+
+	if (stage == BOOTCHAIN_STAGE_KERNEL && kernel_trace_enabled)
+		trace_kernel_instruction(address, instruction);
 
     /*
      * Route SMC instructions from LK or the SecureOS runtime represented
@@ -291,10 +322,30 @@ static void instruction_cb(uc_engine *uc, uint64_t address, uint32_t size,
     }
 }
 
-void cpu_runtime_reset(void)
+void cpu_runtime_reset(bool trace_kernel)
 {
+	cs_err disassembler_error;
+
 	runtime_hooks_installed = false;
 	kernel_write_hook_installed = false;
+	kernel_trace_enabled = trace_kernel;
+	kernel_instruction_count = 0;
+	if (kernel_disassembly) {
+		cs_free(kernel_disassembly, 1);
+		kernel_disassembly = NULL;
+	}
+	if (kernel_disassembler)
+		cs_close(&kernel_disassembler);
+	if (!kernel_trace_enabled)
+		return;
+
+	disassembler_error = cs_open(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN,
+				     &kernel_disassembler);
+	if (disassembler_error == CS_ERR_OK)
+		kernel_disassembly = cs_malloc(kernel_disassembler);
+	if (!kernel_disassembly)
+		fprintf(stderr,
+			"[KERNEL trace] Capstone unavailable; printing raw opcodes\n");
 }
 
 uc_err bootchain_cpu_prepare_stage(uc_engine *uc,
@@ -320,4 +371,3 @@ uc_err bootchain_cpu_prepare_stage(uc_engine *uc,
 	}
 	return UC_ERR_OK;
 }
-

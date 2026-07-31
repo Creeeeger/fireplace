@@ -1,6 +1,7 @@
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UNICORN REQUIRED IMPORTED_TARGET unicorn)
 pkg_check_modules(CRYPTO REQUIRED IMPORTED_TARGET libcrypto)
+pkg_check_modules(CAPSTONE REQUIRED IMPORTED_TARGET capstone)
 
 # LK decodes full-screen JPEGs one guest instruction at a time.  Use the host
 # jpeg-turbo library for the equivalent framebuffer operation.
@@ -92,5 +93,6 @@ target_link_libraries(fireplace_soc PRIVATE
 	fireplace_include
 	PkgConfig::UNICORN
 	PkgConfig::CRYPTO
+	PkgConfig::CAPSTONE
 	${TURBOJPEG_LIBRARY}
 )

@@ -14,6 +14,7 @@ struct bootchain_config {
 	const char *lun_directory;
 	enum fireplace_boot_mode boot_mode;
 	bool headless;
+	bool trace_kernel;
 };
 
 uc_err bootchain_init(uc_engine *uc, const struct bootchain_config *config);

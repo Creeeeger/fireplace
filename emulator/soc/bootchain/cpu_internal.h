@@ -24,7 +24,7 @@
 uc_arm64_reg cpu_x_register(unsigned int index);
 void cpu_system_reset(void);
 void cpu_mmu_reset(void);
-void cpu_runtime_reset(void);
+void cpu_runtime_reset(bool trace_kernel);
 bool cpu_mmu_translate_el1(uc_engine *uc, uint64_t va, bool write,
 			   uint64_t *pa, unsigned int *fault_status);
 bool cpu_mmu_invalidate_aliases(uc_engine *uc);

@@ -242,6 +242,7 @@ int soc_peripherals_init(uc_engine *uc, const struct soc_boot_config *config)
 	bootchain_config.lun_directory = config->lun_directory;
 	bootchain_config.boot_mode = config->boot_mode;
 	bootchain_config.headless = config->headless;
+	bootchain_config.trace_kernel = config->trace_kernel;
 	err = bootchain_init(uc, &bootchain_config);
 	if (err != UC_ERR_OK)
 		fprintf(stderr, "Failed to initialize bootchain: %s\n",

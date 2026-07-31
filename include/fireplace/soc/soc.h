@@ -28,6 +28,7 @@ struct soc_boot_config {
 	const char *lun_directory;
 	enum fireplace_boot_mode boot_mode;
 	bool headless;
+	bool trace_kernel;
 };
 
 int soc_peripherals_init(uc_engine *uc, const struct soc_boot_config *config);

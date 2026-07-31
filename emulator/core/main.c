@@ -76,7 +76,7 @@ enum fireplace_boot_mode get_emulator_boot_mode(void)
 
 static void usage(const char *program)
 {
-	printf("Usage: %s [--headless] [--lun-dir PATH] "
+	printf("Usage: %s [--headless] [--trace-kernel] [--lun-dir PATH] "
 	       "[--boot-mode android|recovery|download]\n", program);
 }
 
@@ -109,6 +109,8 @@ int main(int argc, char **argv)
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "--headless") == 0) {
 			headless = true;
+		} else if (strcmp(argv[i], "--trace-kernel") == 0) {
+			options.trace_kernel = true;
 		} else if (strcmp(argv[i], "--lun-dir") == 0) {
 			if (++i == argc) {
 				fprintf(stderr, "--lun-dir requires a path\n");

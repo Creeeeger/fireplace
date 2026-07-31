@@ -11,6 +11,7 @@ profile is fixed to the bundled `bootchain/G986B` directory.
 
 - CMake and pkg-config
 - Unicorn
+- Capstone
 - OpenSSL/libcrypto
 - libjpeg-turbo
 - SDL2 and OpenGL
@@ -42,6 +43,9 @@ GUI or the headless emulator:
 
 # Headless
 ./build/emulator/core/fireplace --headless --lun-dir .
+
+# Headless with a numbered kernel instruction trace
+./build/emulator/core/fireplace --headless --trace-kernel --lun-dir .
 ```
 
 Android is the default boot mode. Recovery and download modes can be selected

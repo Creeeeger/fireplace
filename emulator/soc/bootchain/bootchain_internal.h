@@ -89,7 +89,7 @@ uc_err bootchain_read_profile_file(const char *filename, char **data,
 uc_err bootchain_decrypt_epbl_image(uc_engine *uc);
 uc_err bootchain_decrypt_el3_image(uc_engine *uc);
 uc_err bootchain_write_u32(uc_engine *uc, uint64_t address, uint32_t value);
-void bootchain_cpu_reset(void);
+void bootchain_cpu_reset(bool trace_kernel);
 uc_err bootchain_cpu_prepare_stage(uc_engine *uc,
 				   enum bootchain_stage stage);
 bool bootchain_cpu_handle_system_instruction(uc_engine *uc);
