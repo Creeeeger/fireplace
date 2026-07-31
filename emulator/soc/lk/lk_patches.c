@@ -63,6 +63,12 @@ uc_err lk_apply_runtime_patches(uc_engine *uc)
 			8,
 		},
 		{
+			"skip download mode for unavailable DFD revision",
+			UINT64_C(0xe806bd04),
+			PATCH_BYTES(0x1f, 0x20, 0x03, 0xd5),
+			4,
+		},
+		{
 			"skip display probe in headless mode",
 			UINT64_C(0xe80b4a78),
 			PATCH_BYTES(0x00, 0x00, 0x80, 0x52,
