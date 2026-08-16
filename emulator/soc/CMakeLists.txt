@@ -58,6 +58,7 @@ target_sources(fireplace_soc PRIVATE
 	bootchain/images.c
 	bootrom/bootrom.c
 	bootrom/auth.c
+	bootrom/ecdsa.c
 	bootrom/fuses.c
 	bootrom/services.c
 	el3_mon/el3_mon.c
@@ -81,6 +82,7 @@ target_sources(fireplace_soc PRIVATE
 	lk/lk_devices.c
 	lk/lk_display.c
 	lk/lk_i2c.c
+	lk/lk_odin.c
 	lk/lk_patches.c
 )
 

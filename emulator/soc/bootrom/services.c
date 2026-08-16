@@ -32,16 +32,6 @@ static bool bootrom_service_hook_active(void)
 	       el3_mon_bootrom_service_active();
 }
 
-static uint32_t bootrom_verify_ecdsa(uc_engine *uc)
-{
-	(void)uc;
-
-	/* The vendor service depends on SSS behavior outside this profile. Keep
-	 * the real call boundary hooked, but make the compatibility policy explicit
-	 * instead of compiling an unreachable software verifier behind a constant. */
-	return 0;
-}
-
 static void ecdsa_verify_cb(uc_engine *uc, uint64_t address, uint32_t size,
 			    void *user_data)
 {
@@ -53,7 +43,7 @@ static void ecdsa_verify_cb(uc_engine *uc, uint64_t address, uint32_t size,
 	(void)user_data;
 	if (!bootrom_service_hook_active())
 		return;
-	result = bootrom_verify_ecdsa(uc);
+	result = bootrom_ecdsa_verify_core(uc);
 	if (uc_reg_read(uc, UC_ARM64_REG_LR, &link) != UC_ERR_OK ||
 	    uc_reg_write(uc, UC_ARM64_REG_X0, &result) != UC_ERR_OK ||
 	    uc_reg_write(uc, UC_ARM64_REG_PC, &link) != UC_ERR_OK) {
@@ -73,7 +63,7 @@ static void ecdsa_dispatch_cb(uc_engine *uc, uint64_t address,
 	(void)user_data;
 	if (!bootrom_service_hook_active())
 		return;
-	result = bootrom_verify_ecdsa(uc);
+	result = bootrom_ecdsa_verify_dispatch(uc);
 	if (uc_reg_read(uc, UC_ARM64_REG_LR, &link) != UC_ERR_OK ||
 	    uc_reg_write(uc, UC_ARM64_REG_X0, &result) != UC_ERR_OK ||
 	    uc_reg_write(uc, UC_ARM64_REG_PC, &link) != UC_ERR_OK) {
@@ -97,6 +87,12 @@ static void receive_fwbl1_cb(uc_engine *uc, uint64_t address, uint32_t size,
 		return;
 	err = bootchain_load_image(uc, FWBL1_IMAGE, FWBL1_LOAD_ADDR,
 				   FWBL1_IMAGE_SIZE);
+	/* The hooked BootROM receive routine normally parses the BL1 header
+	 * before it returns: it saves the checksum word and clears that word in
+	 * the loaded image.  FWBL1's ECDSA signature was made over this cleared
+	 * representation. */
+	if (err == UC_ERR_OK)
+		err = bootchain_write_u32(uc, FWBL1_LOAD_ADDR + 4, 0);
 	if (err == UC_ERR_OK)
 		err = uc_reg_read(uc, UC_ARM64_REG_LR, &link);
 	if (err == UC_ERR_OK)

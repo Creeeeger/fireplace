@@ -49,6 +49,7 @@ int emulator_run(const struct fireplace_emulator_options *options)
 	}
 	boot_config.bootchain_directory = BOOTCHAIN_DIRECTORY;
 	boot_config.lun_directory = options->lun_directory;
+	boot_config.odin_sboot_path = options->odin_sboot_path;
 	boot_config.boot_mode = options->boot_mode;
 	boot_config.headless = options->headless;
 	boot_config.trace_kernel = options->trace_kernel;
@@ -59,6 +60,8 @@ int emulator_run(const struct fireplace_emulator_options *options)
 	       options->boot_mode == FIREPLACE_BOOT_RECOVERY ? "recovery" :
 	       options->boot_mode == FIREPLACE_BOOT_DOWNLOAD ? "download" :
 	       "android");
+	if (options->odin_sboot_path)
+		printf("Odin BOOTLOADER image: %s\n", options->odin_sboot_path);
 	printf("Kernel instruction trace: %s\n",
 	       options->trace_kernel ? "enabled" : "disabled");
 	printf("Bootchain support files: %s\n", BOOTCHAIN_DIRECTORY);

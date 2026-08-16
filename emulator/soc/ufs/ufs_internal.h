@@ -123,6 +123,7 @@ bool ufs_read_lun(uint8_t lun, uint64_t offset, unsigned char *buffer,
 bool ufs_write_lun_overlay(uint8_t lun, uint64_t offset,
 			   const unsigned char *buffer, uint32_t length);
 bool ufs_discard_lun_overlay(uint8_t lun, uint64_t offset, uint64_t length);
+uint64_t ufs_lun_overlay_write_bytes(uint8_t lun);
 const char *ufs_storage_directory(void);
 struct ufs_upiu *ufs_init_response(struct ufs_cmd_desc *desc, uint8_t type,
 				   uint32_t data_length);

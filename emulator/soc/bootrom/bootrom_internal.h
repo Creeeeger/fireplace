@@ -19,6 +19,8 @@ void bootrom_auth_reset(void);
 uc_err bootrom_auth_install(uc_engine *uc);
 uc_err bootrom_auth_install_fwbl1_services(uc_engine *uc);
 void bootrom_auth_report_mode(uc_engine *uc);
+uint32_t bootrom_ecdsa_verify_core(uc_engine *uc);
+uint32_t bootrom_ecdsa_verify_dispatch(uc_engine *uc);
 uc_err bootrom_services_install(uc_engine *uc);
 
 #endif

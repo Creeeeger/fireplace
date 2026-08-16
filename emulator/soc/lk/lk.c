@@ -119,7 +119,8 @@ static void lk_boot_device_cb(uc_engine *uc, uint64_t address, uint32_t size,
 }
 
 uc_err lk_init(uc_engine *uc, bool headless,
-	       enum fireplace_boot_mode boot_mode)
+	       enum fireplace_boot_mode boot_mode,
+	       const char *odin_sboot_path)
 {
 	const struct bootchain_hook hooks[] = {
 		BOOTCHAIN_CODE_HOOK(lk_kernel_handoff_cb, LK_KERNEL_HANDOFF_ADDR),
@@ -140,5 +141,7 @@ uc_err lk_init(uc_engine *uc, bool headless,
 		err = lk_display_init(uc);
 	if (err == UC_ERR_OK)
 		err = lk_devices_init(uc);
+	if (err == UC_ERR_OK)
+		err = lk_odin_init(uc, odin_sboot_path);
 	return err;
 }

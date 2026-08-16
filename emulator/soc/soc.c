@@ -240,6 +240,7 @@ int soc_peripherals_init(uc_engine *uc, const struct soc_boot_config *config)
 	}
 	bootchain_config.image_directory = config->bootchain_directory;
 	bootchain_config.lun_directory = config->lun_directory;
+	bootchain_config.odin_sboot_path = config->odin_sboot_path;
 	bootchain_config.boot_mode = config->boot_mode;
 	bootchain_config.headless = config->headless;
 	bootchain_config.trace_kernel = config->trace_kernel;

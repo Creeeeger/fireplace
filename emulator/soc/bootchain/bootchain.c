@@ -178,6 +178,7 @@ uc_err bootchain_init(uc_engine *uc, const struct bootchain_config *config)
 	if (err == UC_ERR_OK)
 		err = el3_mon_init(uc);
 	if (err == UC_ERR_OK)
-		err = lk_init(uc, config->headless, config->boot_mode);
+		err = lk_init(uc, config->headless, config->boot_mode,
+			      config->odin_sboot_path);
 	return err;
 }

@@ -120,7 +120,8 @@ bool el3_mon_read_secure_os_instruction(uc_engine *uc, uint64_t address,
 bool el3_mon_handle_invalid_memory(uc_engine *uc, uint64_t address);
 bool el3_mon_bootrom_service_active(void);
 uc_err lk_init(uc_engine *uc, bool headless,
-	       enum fireplace_boot_mode boot_mode);
+	       enum fireplace_boot_mode boot_mode,
+	       const char *odin_sboot_path);
 uc_err lk_apply_runtime_patches(uc_engine *uc);
 
 #endif

@@ -28,6 +28,7 @@ enum fireplace_boot_mode {
 
 struct fireplace_emulator_options {
 	const char *lun_directory;
+	const char *odin_sboot_path;
 	enum fireplace_boot_mode boot_mode;
 	bool headless;
 	bool trace_kernel;

@@ -77,7 +77,8 @@ enum fireplace_boot_mode get_emulator_boot_mode(void)
 static void usage(const char *program)
 {
 	printf("Usage: %s [--headless] [--trace-kernel] [--lun-dir PATH] "
-	       "[--boot-mode android|recovery|download]\n", program);
+	       "[--boot-mode android|recovery|download] "
+	       "[--odin-sboot PATH]\n", program);
 }
 
 static bool parse_boot_mode(const char *value,
@@ -121,6 +122,12 @@ int main(int argc, char **argv)
 			if (++i == argc ||
 			    !parse_boot_mode(argv[i], &options.boot_mode))
 				return 2;
+		} else if (strcmp(argv[i], "--odin-sboot") == 0) {
+			if (++i == argc) {
+				fprintf(stderr, "--odin-sboot requires a path\n");
+				return 2;
+			}
+			options.odin_sboot_path = argv[i];
 		} else if (strcmp(argv[i], "--help") == 0 ||
 			   strcmp(argv[i], "-h") == 0) {
 			usage(argv[0]);
@@ -130,6 +137,12 @@ int main(int argc, char **argv)
 			usage(argv[0]);
 			return 2;
 		}
+	}
+	if (options.odin_sboot_path &&
+	    options.boot_mode != FIREPLACE_BOOT_DOWNLOAD) {
+		fprintf(stderr,
+			"--odin-sboot requires --boot-mode download\n");
+		return 2;
 	}
 	if (headless && !options.lun_directory) {
 		fprintf(stderr, "--lun-dir PATH is required for UFS boot\n");

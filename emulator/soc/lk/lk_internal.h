@@ -6,6 +6,7 @@
 
 uc_err lk_boot_mode_init(uc_engine *uc, enum fireplace_boot_mode mode);
 uc_err lk_display_init(uc_engine *uc);
+uc_err lk_odin_init(uc_engine *uc, const char *sboot_path);
 void lk_patches_configure(bool headless);
 
 #endif

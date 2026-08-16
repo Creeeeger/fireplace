@@ -231,8 +231,18 @@ bool ufs_discard_lun_overlay(uint8_t lun, uint64_t offset, uint64_t length)
 	return true;
 }
 
+uint64_t ufs_lun_overlay_write_bytes(uint8_t lun)
+{
+	uint64_t bytes = 0;
+
+	for (struct lun_overlay *overlay = overlay_head; overlay;
+	     overlay = overlay->next)
+		if (overlay->lun == lun && !overlay->discarded)
+			bytes += overlay->size;
+	return bytes;
+}
+
 const char *ufs_storage_directory(void)
 {
 	return lun_dump_dir;
 }
-
