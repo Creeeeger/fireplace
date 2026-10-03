@@ -1,9 +1,12 @@
+/* The low-level SHA API exposes the hardware's intermediate chaining state. */
+#define OPENSSL_SUPPRESS_DEPRECATED
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <openssl/sha.h>
 
 #include "sss/sss_internal.h"
 
@@ -26,6 +29,7 @@ static bool sss_hash_mode(uint32_t mode, const EVP_MD **md, bool *hmac)
 		*hmac = true;
 		return true;
 	case 0x14:
+	case 0x34: /* SHA-256 with a restored IV and previous bit count. */
 		*md = EVP_sha256();
 		*hmac = false;
 		return true;
@@ -61,6 +65,44 @@ static bool sss_digest_plain(const EVP_MD *md, const unsigned char *input,
 		ok = true;
 	EVP_MD_CTX_free(ctx);
 	return ok;
+}
+
+static bool sss_digest_sha256(uint32_t mode, const unsigned char *input,
+			      uint32_t length, bool partial,
+			      unsigned char digest[SHA256_DIGEST_LENGTH])
+{
+	SHA256_CTX ctx;
+	const unsigned char *iv = (const unsigned char *)sss_regs +
+				 (SSS_HASH_IV - SSS_BASE);
+
+	if (SHA256_Init(&ctx) != 1)
+		return false;
+	if ((mode & 0x20) != 0) {
+		for (size_t i = 0; i < 8; i++)
+			ctx.h[i] = ((uint32_t)iv[4 * i] << 24) |
+				   ((uint32_t)iv[4 * i + 1] << 16) |
+				   ((uint32_t)iv[4 * i + 2] << 8) |
+				   iv[4 * i + 3];
+		/* These registers count bits, as saved by the firmware. */
+		ctx.Nl = sss_reg(SSS_HASH_PRE_LEN);
+		ctx.Nh = sss_reg(SSS_HASH_PRE_LEN_HI);
+		if ((ctx.Nl & (SHA256_CBLOCK * 8 - 1)) != 0)
+			return false;
+	}
+	/* Paused transfers expose an unpadded, complete-block chaining value. */
+	if (partial && length % SHA256_CBLOCK != 0)
+		return false;
+	if (SHA256_Update(&ctx, input, length) != 1)
+		return false;
+	if (!partial)
+		return SHA256_Final(digest, &ctx) == 1;
+	for (size_t i = 0; i < 8; i++) {
+		digest[4 * i] = ctx.h[i] >> 24;
+		digest[4 * i + 1] = ctx.h[i] >> 16;
+		digest[4 * i + 2] = ctx.h[i] >> 8;
+		digest[4 * i + 3] = ctx.h[i];
+	}
+	return true;
 }
 
 static bool sss_digest_hmac(uc_engine *uc, const EVP_MD *md,
@@ -156,6 +198,8 @@ bool sss_compute_hash(uc_engine *uc)
 	uint32_t control;
 	uint32_t length;
 	bool hmac = false;
+	bool sha256;
+	bool partial;
 	bool ok;
 
 	control = sss_reg(SSS_HASH_CONTROL);
@@ -187,9 +231,17 @@ bool sss_compute_hash(uc_engine *uc)
 		return false;
 	}
 
-	ok = hmac ? sss_digest_hmac(uc, md, input, length, digest,
-				    &digest_len) :
-		    sss_digest_plain(md, input, length, digest, &digest_len);
+	sha256 = mode == 0x14 || mode == 0x34;
+	partial = sha256 &&
+		  (sss_reg(SSS_HASH_LEN_HI) & UINT32_C(0x80000000)) != 0;
+	if (sha256) {
+		digest_len = SHA256_DIGEST_LENGTH;
+		ok = sss_digest_sha256(mode, input, length, partial, digest);
+	} else {
+		ok = hmac ? sss_digest_hmac(uc, md, input, length, digest,
+					    &digest_len) :
+			    sss_digest_plain(md, input, length, digest, &digest_len);
+	}
 	free(input);
 	if (!ok || digest_len > 64) {
 		sss_log_error("failed to compute hash/HMAC", mode, control,
@@ -201,6 +253,8 @@ bool sss_compute_hash(uc_engine *uc)
 		return false;
 	sss_hash_pending = false;
 	sss_cipher_hash_pending = false;
+	sss_set_reg(uc, SSS_HASH_STATUS, sss_reg(SSS_HASH_STATUS) |
+		    (partial ? SSS_HASH_PARTIAL_DONE : SSS_HASH_DONE));
 
 	if (!sss_hash_logged) {
 		printf("[SSS] serviced BootROM hash/HMAC requests through "

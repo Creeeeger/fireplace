@@ -152,7 +152,7 @@ void sss_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size,
 			sss_clear_status_bits(uc, written);
 		} else if (address == SSS_HASH_STATUS) {
 			sss_set_reg(uc, address, sss_regs[index] & ~written);
-			if ((written & (SSS_HASH_DONE | SSS_HASH_ERROR)) != 0) {
+			if ((written & (SSS_HASH_DONE | SSS_HASH_PARTIAL_DONE)) != 0) {
 				sss_hash_pending = false;
 				sss_cipher_hash_pending = false;
 			}
@@ -265,7 +265,7 @@ void sss_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size,
 	if ((status & SSS_HASH_DONE) == 0 && sss_hash_pending) {
 		if (!sss_compute_hash(uc))
 			return;
-		status = sss_reg(address) | SSS_HASH_DONE;
+		status = sss_reg(address);
 	}
 	sss_set_reg(uc, address, status);
 }
