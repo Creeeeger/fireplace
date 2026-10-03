@@ -67,8 +67,8 @@ artificial timeout; use Ctrl-C to stop it.
 
 ## Dumping the UFS LUNs
 
-Identify the device-to-LUN mapping first, because Linux block-device letters
-are not guaranteed to match this example:
+Identify the device-to-LUN mapping on the phone first, because block-device
+letters are not guaranteed to match this example:
 
 ```sh
 for block in /sys/block/sd*; do
@@ -76,18 +76,20 @@ for block in /sys/block/sd*; do
     scsi=$(basename "$(readlink -f "$block/device")")
     lun=${scsi##*:}
     sectors=$(cat "$block/size")
-    echo "$device -> LUN$lun sectors=$sectors bytes=$((sectors * 512))"
+    echo "$device -> LUN$lun sectors=$sectors"
 done
 ```
 
-With the usual SM-G986B mapping, the images can be copied over ADB:
+With the usual SM-G986B mapping, run these commands on the host with root
+ADB access (for example, in recovery). `adb pull` shows transfer progress;
+`-Z` disables compression:
 
 ```sh
-adb exec-out "dd if=/dev/block/sda bs=4M 2>/dev/null" > lun0.img
-adb exec-out "dd if=/dev/block/sdb bs=4M 2>/dev/null" > lun1.img
-adb exec-out "dd if=/dev/block/sdc bs=4M 2>/dev/null" > lun2.img
-adb exec-out "dd if=/dev/block/sdd bs=4M 2>/dev/null" > lun3.img
-adb exec-out "dd if=/dev/block/sde bs=4M 2>/dev/null" > lun4.img
+adb pull -Z /dev/block/sda lun0.img
+adb pull -Z /dev/block/sdb lun1.img
+adb pull -Z /dev/block/sdc lun2.img
+adb pull -Z /dev/block/sdd lun3.img
+adb pull -Z /dev/block/sde lun4.img
 ```
 
 Expected image sizes:
