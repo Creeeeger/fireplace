@@ -60,8 +60,10 @@ static bool lk_draw_jpeg_on_host(uc_engine *uc)
 	uint64_t jpeg_size;
 	unsigned char *jpeg = NULL;
 	tjhandle decoder = NULL;
-	int image_width;
-	int image_height;
+	int image_width = 0;
+	int image_height = 0;
+	int jpeg_subsampling;
+	int jpeg_colorspace;
 	int draw_x;
 	int draw_y;
 	bool drawn = false;
@@ -81,27 +83,28 @@ static bool lk_draw_jpeg_on_host(uc_engine *uc)
 				(size_t)jpeg_size) != UC_ERR_OK)
 		goto out;
 
-	decoder = tj3Init(TJINIT_DECOMPRESS);
-	if (!decoder || tj3DecompressHeader(decoder, jpeg,
-					   (size_t)jpeg_size) != 0)
+	/* This API is available in both libjpeg-turbo 2.x and 3.x. */
+	decoder = tjInitDecompress();
+	if (!decoder || tjDecompressHeader3(decoder, jpeg,
+					   (unsigned long)jpeg_size,
+					   &image_width, &image_height,
+					   &jpeg_subsampling, &jpeg_colorspace) != 0)
 		goto out;
 
-	image_width = tj3Get(decoder, TJPARAM_JPEGWIDTH);
-	image_height = tj3Get(decoder, TJPARAM_JPEGHEIGHT);
 	if (image_width <= 0 || image_height <= 0 ||
 	    !lk_jpeg_position(requested_x, requested_y, screen_width,
 			      screen_height, align != 0, image_width,
 			      image_height, &draw_x, &draw_y))
 		goto out;
 
-	(void)tj3Set(decoder, TJPARAM_FASTUPSAMPLE, 1);
-	(void)tj3Set(decoder, TJPARAM_FASTDCT, 1);
-	drawn = tj3Decompress8(
-		decoder, jpeg, (size_t)jpeg_size,
+	drawn = tjDecompress2(
+		decoder, jpeg, (unsigned long)jpeg_size,
 		framebuffer + ((size_t)draw_y * FB_WIDTH + draw_x) * FB_BPP,
-		FB_WIDTH * FB_BPP, TJPF_BGRA) == 0;
+		image_width, FB_WIDTH * FB_BPP, image_height, TJPF_BGRA,
+		TJFLAG_FASTUPSAMPLE | TJFLAG_FASTDCT) == 0;
 out:
-	tj3Destroy(decoder);
+	if (decoder)
+		tjDestroy(decoder);
 	free(jpeg);
 	return drawn;
 }

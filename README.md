@@ -18,6 +18,18 @@ profile is fixed to the bundled `bootchain/G986B` directory.
 
 ## Build
 
+On Ubuntu:
+
+```sh
+sudo apt update
+sudo apt install build-essential cmake pkg-config \
+    libunicorn-dev libcapstone-dev libssl-dev libturbojpeg0-dev \
+    libsdl2-dev libgl-dev
+
+cmake -S . -B build
+cmake --build build -j "$(nproc)"
+```
+
 On Apple Silicon with Homebrew dependencies:
 
 ```sh
