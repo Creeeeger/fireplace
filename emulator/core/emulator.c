@@ -53,6 +53,7 @@ int emulator_run(const struct fireplace_emulator_options *options)
 	boot_config.boot_mode = options->boot_mode;
 	boot_config.headless = options->headless;
 	boot_config.trace_kernel = options->trace_kernel;
+	boot_config.secure_os_logs = options->secure_os_logs;
 	printf("== Emulator starting ==\n");
 	printf("Boot media: ufs\n");
 	printf("LUN dumps: %s\n", options->lun_directory);

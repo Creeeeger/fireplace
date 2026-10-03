@@ -161,12 +161,12 @@ bool translate_secure_os_va_coherent(uc_engine *uc,
      * SecureOS may have edited its page tables through one of the
      * high-VA shadow aliases. Copy those writes back to the physical
      * pages before walking the tables again.
-
-    fprintf(stderr,
-            "[EL3] SecureOS translation miss for VA=0x%016" PRIx64
-            "; synchronizing VA shadows and retrying\n",
-            va);
      */
+    if (secure_os_logs)
+        fprintf(stderr,
+                "[EL3] SecureOS translation miss for VA=0x%016" PRIx64
+                "; synchronizing VA shadows and retrying\n",
+                va);
     if (!sync_secure_os_va_shadow(uc))
         return false;
 
@@ -343,5 +343,4 @@ bool page_in_secure_os_va(uc_engine *uc, uint64_t address)
      */
     return true;
 }
-
 

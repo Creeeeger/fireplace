@@ -60,6 +60,9 @@ GUI or the headless emulator:
 ./build/emulator/core/fireplace --headless --trace-kernel --lun-dir .
 ```
 
+Secure OS / EL3 diagnostics are hidden by default. Add `--secure-os-logs`
+to show them in the console.
+
 Android is the default boot mode. Recovery and download modes can be selected
 with `--boot-mode recovery` or `--boot-mode download`. Run with `--help` for
 the complete command-line summary. Headless execution runs without an

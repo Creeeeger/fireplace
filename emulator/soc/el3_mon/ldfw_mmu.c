@@ -200,6 +200,9 @@ bool prepare_ldfw_va_shadow(uc_engine *uc, uint64_t context_base,
     ldfw_shadow_active = true;
     ldfw_shadow_context = context_base;
     ldfw_shadow_size = aligned_size;
+    if (secure_os_logs)
+        printf("[LDFW] context=0x%" PRIx64 " shadow_size=0x%" PRIx64 "\n",
+               context_base, aligned_size);
     return true;
 }
 
@@ -339,5 +342,4 @@ bool find_ldfw_context(uint64_t base, uint64_t *size)
 
     return false;
 }
-
 

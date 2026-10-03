@@ -27,6 +27,11 @@ void lk_handoff_cb(uc_engine *uc,
         return;
     }
 
+    if (secure_os_logs)
+        printf("[EL3 ERET] smc=0x%" PRIx64 " target=0x%" PRIx64
+               " spsr=0x%" PRIx64 " sp=0x%" PRIx64 "\n",
+               active_smc, return_address, return_spsr, stack_pointer);
+
     /*
      * Return from an EL3-handled SecureOS runtime SMC.
      *
@@ -324,5 +329,4 @@ void lk_handoff_cb(uc_engine *uc,
     bootchain_request_resume(return_address);
     uc_emu_stop(uc);
 }
-
 

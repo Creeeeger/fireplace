@@ -15,6 +15,7 @@
 #define MCT_LOCAL_SIZE 0x1000
 #define MCT_LOCAL_TIMER0_CUR_RAW 0x14
 
+uint64_t mct_ticks(void);
 int mct_init(struct uc_struct *uc);
 void mct_hook(uc_engine *uc, uc_mem_type type, uint64_t address, int size,
 	      int64_t value, void *user_data);

@@ -8,7 +8,7 @@
 
 static struct timespec mct_epoch;
 
-static uint64_t mct_ticks(void)
+uint64_t mct_ticks(void)
 {
 	struct timespec now;
 	uint64_t elapsed_ns;

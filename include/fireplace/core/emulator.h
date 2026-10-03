@@ -32,6 +32,7 @@ struct fireplace_emulator_options {
 	enum fireplace_boot_mode boot_mode;
 	bool headless;
 	bool trace_kernel;
+	bool secure_os_logs;
 };
 
 int emulator_run(const struct fireplace_emulator_options *options);

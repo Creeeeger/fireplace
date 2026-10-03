@@ -30,6 +30,7 @@ struct soc_boot_config {
 	enum fireplace_boot_mode boot_mode;
 	bool headless;
 	bool trace_kernel;
+	bool secure_os_logs;
 };
 
 int soc_peripherals_init(uc_engine *uc, const struct soc_boot_config *config);

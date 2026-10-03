@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+extern bool secure_os_logs;
+
 #include <unicorn/unicorn.h>
 
 #include <fireplace/soc/bootchain/bootchain.h>

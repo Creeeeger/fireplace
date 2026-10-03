@@ -138,6 +138,9 @@ bool complete_secure_os_return_to_lk(uc_engine *uc)
         return false;
     }
 
+    if (secure_os_logs)
+        printf("[SecureOS] return to LK pc=0x%" PRIx64 " x0=0x%" PRIx64 "\n",
+               target, secure_os_runtime_lk_x0);
     ldfw_runtime_setup_active = false;
     reset_ldfw_monitor_frame();
     secure_os_active = false;
@@ -211,5 +214,4 @@ bool complete_harx_hvc_return_to_lk(uc_engine *uc,
     uc_emu_stop(uc);
     return true;
 }
-
 

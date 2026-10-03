@@ -84,6 +84,12 @@ bool el3_mon_route_svc(uc_engine *uc, uint64_t return_address_value,
         return true;
     }
 
+    if (secure_os_logs)
+        printf("[SecureOS SVC] imm=0x%x return=0x%" PRIx64
+               " x0=0x%" PRIx64 " vector=0x%" PRIx64
+               " sp_el0=0x%" PRIx64 " sp_el1=0x%" PRIx64 "\n",
+               (unsigned int)immediate, return_address_value, x0, vector,
+               sp_el0, sp_el1);
     bootchain_request_resume(vector);
     uc_emu_stop(uc);
     return true;
@@ -194,5 +200,4 @@ bool el3_mon_route_undefined_instruction(uc_engine *uc,
     uc_emu_stop(uc);
     return true;
 }
-
 

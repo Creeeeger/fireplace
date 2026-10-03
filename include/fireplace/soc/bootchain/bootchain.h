@@ -16,6 +16,7 @@ struct bootchain_config {
 	enum fireplace_boot_mode boot_mode;
 	bool headless;
 	bool trace_kernel;
+	bool secure_os_logs;
 };
 
 uc_err bootchain_init(uc_engine *uc, const struct bootchain_config *config);

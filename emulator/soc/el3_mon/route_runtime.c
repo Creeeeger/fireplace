@@ -69,6 +69,12 @@ bool el3_mon_route_runtime_smc(uc_engine *uc,
             return true;
         }
 
+        if (secure_os_logs)
+            printf("[SecureOS SMC] -> EL3 fid=0x%" PRIx64
+                   " return=0x%" PRIx64 " x1=0x%" PRIx64 " x2=0x%" PRIx64
+                   " x3=0x%" PRIx64 " x4=0x%" PRIx64 " sp=0x%" PRIx64 "\n",
+                   function_id, return_address_value, x1, x2, x3, x4, runtime_sp);
+
         /*
          * 0xb2000301 is the SecureOS -> normal-world switch.  Its call
          * site is deliberately non-returning; x1 is the value delivered
@@ -231,6 +237,12 @@ bool el3_mon_route_runtime_smc(uc_engine *uc,
         return true;
     }
 
+    if (secure_os_logs)
+        printf("[LDFW SMC] -> EL3 fid=0x%" PRIx64
+               " return=0x%" PRIx64 " context=0x%" PRIx64
+               " x1=0x%" PRIx64 " x2=0x%" PRIx64 "\n",
+               function_id, return_address_value, ldfw_context_base, x1, x2);
+
     if (!sync_ldfw_va_shadow(uc)) {
         fprintf(stderr,
                 "[EL3] failed to synchronize LDFW VA shadow\n");
@@ -258,5 +270,4 @@ bool el3_mon_route_runtime_smc(uc_engine *uc,
     uc_emu_stop(uc);
     return true;
 }
-
 

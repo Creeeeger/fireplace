@@ -56,6 +56,10 @@ bool el3_mon_route_smc(uc_engine *uc, uint64_t return_address_value)
 
     uc_reg_read(uc, UC_ARM64_REG_X1, &x1);
     uc_reg_read(uc, UC_ARM64_REG_X2, &x2);
+    if (secure_os_logs)
+        printf("[EL3 SMC] LK -> EL3 fid=0x%" PRIx64
+               " return=0x%" PRIx64 " x1=0x%" PRIx64 " x2=0x%" PRIx64 "\n",
+               active_smc, return_address_value, x1, x2);
 
     if (active_smc == EL3_SMC_SECURE_OS &&
         !capture_normal_world_el1_context()) {
@@ -202,5 +206,4 @@ bool el3_mon_secure_os_active(void)
     return bootchain_stage() == BOOTCHAIN_STAGE_EL3 &&
            secure_os_active;
 }
-
 

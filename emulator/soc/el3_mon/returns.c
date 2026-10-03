@@ -37,6 +37,8 @@ void ldfw_decrypt_success_cb(uc_engine *uc, uint64_t address,
         return;
 
     ldfw_runtime_setup_active = true;
+    if (secure_os_logs)
+        printf("[LDFW] decrypted; preparing runtime\n");
     ldfw_context_base = 0;
     reset_ldfw_va_shadow();
     reset_ldfw_monitor_frame();
@@ -258,9 +260,12 @@ bool complete_secure_os_el1_eret(uc_engine *uc, uint64_t address)
         return false;
     }
 
+    if (secure_os_logs)
+        printf("[SecureOS ERET] pc=0x%" PRIx64 " -> 0x%" PRIx64
+               " spsr=0x%" PRIx64 " sp=0x%" PRIx64 "\n",
+               address, target_pc, target_pstate, target_sp);
     bootchain_request_resume(target_pc);
     uc_emu_stop(uc);
     return true;
 }
-
 
