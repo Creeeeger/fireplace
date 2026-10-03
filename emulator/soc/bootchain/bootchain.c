@@ -4,6 +4,7 @@
 #include "bootchain/bootchain_internal.h"
 
 bool secure_os_logs;
+bool secure_os_internal_logs;
 
 static enum bootchain_stage current_stage;
 static bool completed;
@@ -165,6 +166,7 @@ uc_err bootchain_init(uc_engine *uc, const struct bootchain_config *config)
 	failed = false;
 	resume_requested = false;
 	secure_os_logs = config->secure_os_logs;
+	secure_os_internal_logs = config->secure_os_internal_logs;
 	bootchain_cpu_reset(config->trace_kernel);
 	err = bootchain_images_validate();
 	if (err == UC_ERR_OK)

@@ -61,7 +61,8 @@ GUI or the headless emulator:
 ```
 
 Secure OS / EL3 diagnostics are hidden by default. Add `--secure-os-logs`
-to show them in the console.
+to show them in the console. Use `--secure-os-internal-logs` for Secure OS /
+LDFW firmware console messages. The flags can be enabled independently or together.
 
 Android is the default boot mode. Recovery and download modes can be selected
 with `--boot-mode recovery` or `--boot-mode download`. Run with `--help` for

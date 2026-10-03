@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 extern bool secure_os_logs;
+extern bool secure_os_internal_logs;
 
 #include <unicorn/unicorn.h>
 

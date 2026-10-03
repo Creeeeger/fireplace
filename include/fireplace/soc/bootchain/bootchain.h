@@ -17,6 +17,7 @@ struct bootchain_config {
 	bool headless;
 	bool trace_kernel;
 	bool secure_os_logs;
+	bool secure_os_internal_logs;
 };
 
 uc_err bootchain_init(uc_engine *uc, const struct bootchain_config *config);

@@ -190,6 +190,8 @@ void bootchain_log_console(uc_engine *uc, bool formatted)
 	} else {
 		read_lk_cstring(uc, registers[0], output, sizeof(output));
 	}
+	if (bootchain_stage() == BOOTCHAIN_STAGE_EL3 && output[0] != '\0')
+		uart_append_text("secure_log: ");
 	uart_append_text(output);
 }
 

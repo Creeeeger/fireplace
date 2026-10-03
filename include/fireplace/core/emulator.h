@@ -33,6 +33,7 @@ struct fireplace_emulator_options {
 	bool headless;
 	bool trace_kernel;
 	bool secure_os_logs;
+	bool secure_os_internal_logs;
 };
 
 int emulator_run(const struct fireplace_emulator_options *options);

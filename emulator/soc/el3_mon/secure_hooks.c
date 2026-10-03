@@ -27,7 +27,7 @@ void secure_os_instruction_cb(uc_engine *uc, uint64_t address,
     }
 
     /* Recognize the console sink across SecureOS boot/runtime relocation. */
-    if (secure_os_logs && (address & UINT64_C(0xfff)) == 0x9b4) {
+    if (secure_os_internal_logs && (address & UINT64_C(0xfff)) == 0x9b4) {
         const uint32_t prologue[] = {
             0xa9ba7bfd, 0x910003fd, 0xa90153f3, 0xaa0003f3,
             0xf00001a0, 0xa9025bf5, 0xa90363f7, 0x90000275,

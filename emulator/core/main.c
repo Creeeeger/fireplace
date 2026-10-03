@@ -76,7 +76,8 @@ enum fireplace_boot_mode get_emulator_boot_mode(void)
 
 static void usage(const char *program)
 {
-	printf("Usage: %s [--headless] [--trace-kernel] [--secure-os-logs] [--lun-dir PATH] "
+	printf("Usage: %s [--headless] [--trace-kernel] [--secure-os-logs] "
+	       "[--secure-os-internal-logs] [--lun-dir PATH] "
 	       "[--boot-mode android|recovery|download] "
 	       "[--odin-sboot PATH]\n", program);
 }
@@ -114,6 +115,8 @@ int main(int argc, char **argv)
 			options.trace_kernel = true;
 		} else if (strcmp(argv[i], "--secure-os-logs") == 0) {
 			options.secure_os_logs = true;
+		} else if (strcmp(argv[i], "--secure-os-internal-logs") == 0) {
+			options.secure_os_internal_logs = true;
 		} else if (strcmp(argv[i], "--lun-dir") == 0) {
 			if (++i == argc) {
 				fprintf(stderr, "--lun-dir requires a path\n");

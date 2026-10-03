@@ -31,6 +31,7 @@ struct soc_boot_config {
 	bool headless;
 	bool trace_kernel;
 	bool secure_os_logs;
+	bool secure_os_internal_logs;
 };
 
 int soc_peripherals_init(uc_engine *uc, const struct soc_boot_config *config);

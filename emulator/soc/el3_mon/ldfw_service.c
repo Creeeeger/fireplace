@@ -95,7 +95,7 @@ void ldfw_low_va_cb(uc_engine *uc, uint64_t address, uint32_t size,
     if (ldfw_shadow_context == ldfw_context_base &&
         ldfw_shadow_contains(address)) {
         /* Each LDFW module has the same printf entry at a different VA. */
-        if (secure_os_logs &&
+        if (secure_os_internal_logs &&
             (address == UINT64_C(0x147a0) || address == UINT64_C(0x3148) ||
              address == UINT64_C(0x6a4c) || address == UINT64_C(0x3ec8) ||
              address == UINT64_C(0x7ddc))) {
