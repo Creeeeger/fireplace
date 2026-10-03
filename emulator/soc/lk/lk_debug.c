@@ -171,25 +171,36 @@ static void format_lk_printf(uc_engine *uc, const char *format,
 	output[output_position] = '\0';
 }
 
-void lk_printf_cb(uc_engine *uc, uint64_t address, uint32_t size,
-		  void *user_data)
+void bootchain_log_console(uc_engine *uc, bool formatted)
 {
 	uint64_t registers[8] = {0};
 	uint64_t stack = 0;
 	char format[1024];
-	char formatted[4096];
+	char output[4096];
 
+	if (uc_reg_read(uc, UC_ARM64_REG_X0, &registers[0]) != UC_ERR_OK)
+		return;
+	if (formatted) {
+		for (int i = 1; i < 8; i++)
+			uc_reg_read(uc, UC_ARM64_REG_X0 + i, &registers[i]);
+		uc_reg_read(uc, UC_ARM64_REG_SP, &stack);
+		read_lk_cstring(uc, registers[0], format, sizeof(format));
+		format_lk_printf(uc, format, registers, stack, output,
+				 sizeof(output));
+	} else {
+		read_lk_cstring(uc, registers[0], output, sizeof(output));
+	}
+	uart_append_text(output);
+}
+
+void lk_printf_cb(uc_engine *uc, uint64_t address, uint32_t size,
+		  void *user_data)
+{
 	(void)address;
 	(void)size;
 	(void)user_data;
 	if (bootchain_stage() != BOOTCHAIN_STAGE_LK)
 		return;
-	for (int i = 0; i < 8; i++)
-		uc_reg_read(uc, UC_ARM64_REG_X0 + i, &registers[i]);
-	uc_reg_read(uc, UC_ARM64_REG_SP, &stack);
-	read_lk_cstring(uc, registers[0], format, sizeof(format));
-	format_lk_printf(uc, format, registers, stack, formatted,
-			 sizeof(formatted));
-	uart_append_text(formatted);
+	bootchain_log_console(uc, true);
 	(void)bootchain_return_to_link(uc);
 }

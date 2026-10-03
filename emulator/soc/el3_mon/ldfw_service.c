@@ -93,8 +93,26 @@ void ldfw_low_va_cb(uc_engine *uc, uint64_t address, uint32_t size,
     if (!servicing_lk || !ldfw_shadow_active)
         return;
     if (ldfw_shadow_context == ldfw_context_base &&
-        ldfw_shadow_contains(address))
+        ldfw_shadow_contains(address)) {
+        /* Each LDFW module has the same printf entry at a different VA. */
+        if (secure_os_logs &&
+            (address == UINT64_C(0x147a0) || address == UINT64_C(0x3148) ||
+             address == UINT64_C(0x6a4c) || address == UINT64_C(0x3ec8) ||
+             address == UINT64_C(0x7ddc))) {
+            const uint32_t prologue[] = {
+                0xa9ba6ffc, 0xa90167fa, 0xa9025ff8, 0xa90357f6,
+                0xa9044ff4, 0xa9057bfd, 0x910143fd, 0xd10103ff,
+                0xaa0003f4, 0xa9031fe6, 0xa90217e4, 0xa9010fe2,
+            };
+            uint32_t code[ARRAY_SIZE(prologue)];
+
+            /* Low VAs are reused: verify that this context owns printf. */
+            if (uc_mem_read(uc, address, code, sizeof(code)) == UC_ERR_OK &&
+                memcmp(code, prologue, sizeof(code)) == 0)
+                bootchain_log_console(uc, true);
+        }
         return;
+    }
 
     fprintf(stderr, "[EL3] LDFW executed unmapped VA 0x%08" PRIx64 "\n",
             address);

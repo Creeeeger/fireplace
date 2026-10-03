@@ -11,6 +11,8 @@ extern bool secure_os_logs;
 
 #include <fireplace/soc/bootchain/bootchain.h>
 
+void bootchain_log_console(uc_engine *uc, bool formatted);
+
 enum bootchain_stage {
 	BOOTCHAIN_STAGE_BOOTROM,
 	BOOTCHAIN_STAGE_FWBL1,

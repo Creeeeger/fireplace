@@ -26,6 +26,20 @@ void secure_os_instruction_cb(uc_engine *uc, uint64_t address,
         return;
     }
 
+    /* Recognize the console sink across SecureOS boot/runtime relocation. */
+    if (secure_os_logs && (address & UINT64_C(0xfff)) == 0x9b4) {
+        const uint32_t prologue[] = {
+            0xa9ba7bfd, 0x910003fd, 0xa90153f3, 0xaa0003f3,
+            0xf00001a0, 0xa9025bf5, 0xa90363f7, 0x90000275,
+            0x912022b5, 0xa9046bf9, 0x910012b7, 0xf947a800,
+        };
+        uint32_t code[ARRAY_SIZE(prologue)];
+
+        if (uc_mem_read(uc, address, code, sizeof(code)) == UC_ERR_OK &&
+            memcmp(code, prologue, sizeof(code)) == 0)
+            bootchain_log_console(uc, false);
+    }
+
     if (!el3_mon_read_secure_os_instruction(uc, address, &insn) &&
         uc_mem_read(uc, address, &insn, sizeof(insn)) != UC_ERR_OK)
         return;
