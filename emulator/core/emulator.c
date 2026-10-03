@@ -71,6 +71,12 @@ int emulator_run(const struct fireplace_emulator_options *options)
 		fprintf(stderr, "Failed to open Unicorn: %s\n", uc_strerror(err));
 		return EXIT_FAILURE;
 	}
+	/* Match the firmware's 4 KiB pages instead of Unicorn's 1 KiB default. */
+	err = uc_ctl_set_page_size(uc, UINT32_C(0x1000));
+	if (err != UC_ERR_OK) {
+		fprintf(stderr, "Failed to set Unicorn page size: %s\n", uc_strerror(err));
+		goto out;
+	}
 	if (memmap_soc(uc, MEMORY_12GB) != UC_ERR_OK) {
 		fprintf(stderr, "Failed to map SoC memory\n");
 		goto out;
